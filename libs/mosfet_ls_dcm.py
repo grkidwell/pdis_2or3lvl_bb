@@ -94,7 +94,7 @@ class Losses:
         self.rglsdrvr = {5:self.ic_params['rg_lsdrvr_5V'],
                         10:self.ic_params['rg_lsdrvr_10V']}[self.vgate]
         self.rgls = self.lsfp['Rg']+self.m_ls*self.rglsdrvr        
-        self.i_valley = max(0,idc-ipp/2); self.i_peak = max(ipp,idc+ipp/2)
+        self.i_valley = max(0,self.idc-self.ipp/2); self.i_peak = max(self.ipp,self.idc+self.ipp/2)
         
         self.fet_cap = Fet_cap_vs_vds(self.lsfp,self.vds)
         self.summary = {'bd_on':self.bd_f()['on'],
@@ -127,13 +127,15 @@ class Losses:
         tmult = tcoeff*(self.ckt_params['Tamb']-25)
         rdson = {5:self.lsfet_params['Rdson_4.5V'],10:self.lsfet_params['Rdson_10V']}[self.vgate]*(1+tmult)
         t_Qls = self.ckt_params['t_Qls']
-        i_fetrms = ((self.idc**2+self.ipp**2/12)*t_Qls/self.ts/self.m_ls)**0.5
+        i_fetrms = ((self.idc**2+self.ipp**2/12)*t_Qls/self.ts)**0.5
         return i_fetrms**2*rdson 
 
     def qrr(self):
             lsp=self.lsfet_params
             qoss = self.fet_cap.q_oss(lsp['Vds_qrr'])
-            return max((lsp['Qrr']-qoss)/lsp['Id_qrr']*self.i_valley,0)
+            #old return max((lsp['Qrr']-qoss)/lsp['Id_qrr']*self.i_valley,0)
+            #if qoss>qrr then qrr losses aren't counted which makes no sense
+            return lsp['Qrr']*(self.i_valley/lsp['Id_qrr'])**0.5
 
     def ring_f(self):
         qoss_vphase = self.fet_cap.q_oss(self.vds)

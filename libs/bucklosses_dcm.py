@@ -61,7 +61,7 @@ class Buckconverter_losses:
                          'hs gate':self.p_hs['gate'],
                          'ls rdson':self.p_ls['cond'],
                          'ls bd':self.p_ls['bd_on']+self.p_ls['bd_off'],
-                         'ls qrr':self.p_ls['ring'],
+                         'ls ring_qrr':self.p_ls['ring'],
                          'ls gate':self.p_ls['gate'],
                          'q4_rdson':self.p_q4['cond'],
                          'lout rdc+rac':self.p_lout['dcr'],
@@ -77,7 +77,7 @@ class Buckconverter_losses:
                         'q4 fet':sum(list(self.p_q4.values())),
                         'lout':sum(list(self.p_lout.values())),
                         'caps':sum(list(self.p_caps.values())),
-                        'ic_with_gate' : self.p_summary['ic']+(self.p_summary['hs gate']+self.p_summary['ls gate'])}
+                        'ic_with_gate' : self.p_summary['ic']+(self.p_summary['hs gate']*self.ip['m_hs']+self.p_summary['ls gate']*self.ip['m_ls'])}
 
         
         self.ptotal = (self.p_totals['hs fet']*self.ip['m_hs']+self.p_totals['ls fet']*self.ip['m_ls'])*{'2 level':1,'3 level':2}[self.lvl_config]+ \
