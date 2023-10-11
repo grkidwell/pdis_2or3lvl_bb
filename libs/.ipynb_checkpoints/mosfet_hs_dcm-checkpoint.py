@@ -101,7 +101,7 @@ class Fet_switching_on:
         self.Cgd_0 = self.hsfp['Crss_Vds2']
         self.Cgd_1 = self.fet_cap.cgd_0V
         
-        self.ld = self.hsfp['Ldrain']+self.lsfp['Ldrain']+self.lsfp['Lsource']
+        self.ld = self.hsfp['Ldrain']+(self.lsfp['Ldrain']+self.lsfp['Lsource'])/self.m_ls
 
         
     def period_td(self,**kwargs):  #function will be called twice - first for final state, then for f(t)
@@ -124,7 +124,7 @@ class Fet_switching_on:
         exp_flag = (tau_gs > 2*tau_gd) #yes - exponential.  no - sinusoidal
         
         tau_a = 2*tau_gd**2/tau_gs
-        w_a = ((1/tau_gd**2-(tau_gs/(2*tau_gd**2))**2)**2)**(1/4)
+        w_a = ((1/tau_gd**2-(tau_gs/(2*tau_gd**2))**2)**2)**(1/4)   #sometimes would get imaginary
         tau_b = 2*tau_gd**2/(tau_gs-(tau_gs**2-4*(tau_gd)**2)**0.5)
         tau_c = 2*tau_gd**2/(tau_gs+(tau_gs**2-4*(tau_gd)**2)**0.5)
 
@@ -276,6 +276,7 @@ class Fet_switching_on:
                     't1':final_states['t1']['ton'],
                     't2':final_states['t2']['ton'],
                     't3':4e-8}
+        self.t_widths = t_width
                 
         if 't' in kwargs.keys():
             t=kwargs['t']
@@ -315,11 +316,12 @@ class Fet_switching_on:
         tarray=np.arange(0,tfinal,tstep, dtype=float)
 
         vg_id_vds=np.vectorize(whole_sequence_t)(tarray)
-        vgs = [];id=[];vds=[]
+        vgs = [];id=[];vds=[];pds=[]
         for tslice in vg_id_vds.tolist():
             vgs.append(tslice['vgs'])
             id.append(tslice['id'])
             vds.append(tslice['vds'])
+            pds.append(tslice['id']*tslice['vds']/10)
         vds[0]=self.vds
 
         f = plt.figure(figsize=(6,3))
@@ -328,6 +330,7 @@ class Fet_switching_on:
         ax.plot(tarray*1e9,vgs, 'r')
         ax.plot(tarray*1e9,id, 'b')
         ax.plot(tarray*1e9,vds, 'g')
+        ax.plot(tarray*1e9,pds, 'm')
 
 class Fet_switching_off:
     def __init__(self,args:tuple):      #idc and ipp are total current   
@@ -351,7 +354,7 @@ class Fet_switching_off:
         self.Cgd_0 = self.hsfp['Crss_Vds2']
         self.Cgd_1 = self.fet_cap.cgd_0V
         
-        self.ld = self.hsfp['Ldrain']+self.lsfp['Ldrain']+self.lsfp['Lsource']
+        self.ld = self.hsfp['Ldrain']+(self.lsfp['Ldrain']+self.lsfp['Lsource'])/self.m_ls
 
     def period_td(self,**kwargs):
         tau_gs = self.rghs*(self.Cgd_1+self.cgs)
@@ -569,14 +572,15 @@ class Fet_switching_off:
 
 class Losses:
     def __init__(self,ckt_params,fs_dcm,*args): 
-        self.ic_params,self.hsfet_params,lsfet_params,self.vds,self.vgate,self.idc,self.ipp,self.m_hs,m_ls,rd = args        
+        self.args=args
+        self.ic_params,self.hsfet_params,lsfet_params,self.vds,self.vgate,self.idc,self.ipp,self.m_hs,m_ls,rd = self.args        
         self.ckt_params = ckt_params 
         self.state_count = self.ckt_params['state count']
         self.ts = {4:(2*self.ckt_params['t_state13']+2*self.ckt_params['t_state24']),
                    2:self.ckt_params['t_state13']+self.ckt_params['t_state24']}[self.state_count]
         self.fs=fs_dcm*{2:1,4:0.5}[self.state_count]   #1/self.ts        
-        self.fet_switch_on_obj = Fet_switching_on(args)
-        self.fet_switch_off_obj = Fet_switching_off(args)        
+        self.fet_switch_on_obj = Fet_switching_on(self.args)
+        self.fet_switch_off_obj = Fet_switching_off(self.args)        
         self.summary = {'sw_on':self.fs*self.fet_switch_on_obj.e_on(),
                         'sw_off':self.fs*self.fet_switch_off_obj.e_off(),
                         'cond': self.cond_f(),
