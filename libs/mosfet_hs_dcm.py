@@ -81,16 +81,16 @@ class Fet_cap_vs_vds:
 
 class Fet_switching_on:   
     def __init__(self,args:tuple):  #idc and ipp are total current
-        ic_params,hsfet_params,lsfet_params,vds,vgate,idc,ipp,m_hs,m_ls,rd = args
+        ic_params,hsfet_params,lsfet_params,vds,vgate,rboot,idc,ipp,m_hs,m_ls,rd = args
         self.icp = ic_params; self.hsfp = hsfet_params; self.lsfp = lsfet_params
-        self.vds = vds; self.vdr = vgate
+        self.vds = vds; self.vdr = vgate; self.rboot = rboot
         self.idc = idc/m_hs; self.ipp = ipp/m_hs
         self.m_hs=m_hs; self.m_ls=m_ls; self.rd=rd
         
         self.vth = self.hsfp['Qgs']/self.hsfp['Ciss_Vds2'] 
         self.rghsdrvr = {5:self.icp['rg_hsdrvr_5V'],
                         10:self.icp['rg_hsdrvr_10V']}[self.vdr]
-        self.rghs = self.hsfp['Rg']+self.m_hs*self.rghsdrvr    
+        self.rghs = self.hsfp['Rg']+self.m_hs*self.rghsdrvr+self.rboot    
         
         self.i_valley = max(0,self.idc-self.ipp/2); self.i_peak = max(self.ipp,self.idc+self.ipp/2)
         
@@ -334,7 +334,7 @@ class Fet_switching_on:
 
 class Fet_switching_off:
     def __init__(self,args:tuple):      #idc and ipp are total current   
-        ic_params,hsfet_params,lsfet_params,vds,vgate,idc,ipp,m_hs,m_ls,rd = args
+        ic_params,hsfet_params,lsfet_params,vds,vgate,rboot,idc,ipp,m_hs,m_ls,rd = args
         self.icp = ic_params; self.hsfp = hsfet_params; self.lsfp = lsfet_params        
         self.vds = vds; self.vdr = vgate        
         self.idc = idc/m_hs; self.ipp = ipp/m_hs
@@ -573,7 +573,7 @@ class Fet_switching_off:
 class Losses:
     def __init__(self,ckt_params,fs_dcm,*args): 
         self.args=args
-        self.ic_params,self.hsfet_params,lsfet_params,self.vds,self.vgate,self.idc,self.ipp,self.m_hs,m_ls,rd = self.args        
+        self.ic_params,self.hsfet_params,lsfet_params,self.vds,self.vgate,self.rboot,self.idc,self.ipp,self.m_hs,m_ls,rd = self.args        
         self.ckt_params = ckt_params 
         self.state_count = self.ckt_params['state count']
         self.ts = {4:(2*self.ckt_params['t_state13']+2*self.ckt_params['t_state24']),
@@ -605,4 +605,4 @@ class Losses:
         ciss_0V = self.hsfet_params['Ciss_0V']
         qfet_gate = self.vgate*ciss_0V
         vbias = {'no':self.vgate,'yes':self.ckt_params['vin']}[self.ic_params['ldo']]
-        return qfet_gate*self.vgate*(1/2+vbias/self.vgate/2)*self.fs
+        return qfet_gate*self.vgate*(vbias/self.vgate)*self.fs

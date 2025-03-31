@@ -145,4 +145,4 @@ class Losses:
         ciss_0V = self.lsfet_params['Ciss_0V']
         qfet_gate = self.vgate*ciss_0V
         vbias = {'no':self.vgate,'yes':self.ckt_params['vin']}[self.ic_params['ldo']]
-        return qfet_gate*self.vgate*(1/2+vbias/self.vgate/2)*self.fs
+        return qfet_gate*self.vgate*(vbias/self.vgate)*self.fs

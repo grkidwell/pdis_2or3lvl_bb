@@ -1,26 +1,48 @@
+#in this version, will remove lparams dependent variable from Inductor_pdiss constructor 
+#and create lparams dictionary within same constructor
+#also change lset function 
+
 import numpy as np
 import pandas as pd
 from winding_temp_dcm import dcr_temp
+
+from circuit_4state import circuit_params as circuit_params_4state
+from circuit_2state import circuit_params as circuit_params_2state
 
 cyntec_filename = r'data/cyntec_inductor_data.xlsx'
 
 #ckt_params = {'deltaV','duty','fs','Tamb','Idc'}
 
 class Inductor_pdis:
-    def __init__(self,ckt_params:dict,Lparams:dict):
-        self.ckt = ckt_params.copy()
-        self.ipp = self.ckt['deltaV']*self.ckt['t_for_deltaV']/Lparams['Lout']/1e-6
+    def __init__(self,inp_params): #ckt_params):#dict,Lparams:dict):
+        self.ip = inp_params.copy()
+        self.ckt = {'2 level':circuit_params_2state(self.ip),
+              '3 level':circuit_params_4state(self.ip)}\
+              [self.ip['lvl_config']]
+        #self.ckt = ckt_params #.copy()
+        l_ip = self.ckt['ip']['lout']
+        self.ind = lparams(l_ip['value(uH)'],create_ind_family_df(l_ip['family']))   #Lparams.copy()
         self.idc = self.ckt['Idc']
         
-        self.dcm_ratio=min(1,self.idc/(self.ipp/2))
+        # self.ckt = ckt_params.copy()
+        # self.ton_mult = self.ckt['ton_mult']
+        
+        #self.ipp = abs(self.ckt['deltaV']*self.ton_mult*self.ckt['t_for_deltaV']/Lparams['Lout']/1e-6)
+        
+        #self.ipp = abs(self.ckt['deltaV']*self.ckt['t_for_deltaV']/Lparams['Lout']/1e-6)        
+        
+        self.do_ccm_stuff()
+        
+        self.ton_mult=self.ckt['ton_mult']
+        #self.dcm_ratio=min(1,self.idc/(self.ipp/2))
         
         #phasenode dcm and ccm frequency
-        self.fs_dcm = self.dcm_ratio/(self.ckt['t_state13']+self.ckt['t_state24'])
+        self.fs_dcm = round(self.dcm_ratio/(self.ckt['t_state13']+self.ckt['t_state24']),0)
         
         self.irms_dcm = self.i_rms_dcm()
         
         
-        self.ind = Lparams.copy()
+        
         self.ind['K1']=0  #no ac winding loss.  see winding_temp.py
         self.p_core    = self.pcore()#self.ckt,Lparams)
         self.tempco = 1/(234.45+25)
@@ -31,8 +53,52 @@ class Inductor_pdis:
         self.p_dc = self.DCR*self.irms_dcm**2
         self.p_tot = self.p_dc+self.p_core
         self.summary = {'dcr':self.p_dc,
-                        'core':self.p_core}
+                        'core':self.p_core,
+                        'ipp':self.ipp,
+                        'fs_dcm':self.fs_dcm,
+                        'ton_mult':self.ton_mult,
+                        'irms_dcm':self.irms_dcm}
         
+    def do_ccm_stuff(self):
+        #ton_mult  = self.ckt['ton_mult']
+        ipp       = abs(self.ckt['deltaV']*self.ckt['t_for_deltaV']/self.ind['Lout']/1e-6) 
+        dcm_ratio = self.idc/(ipp/2)
+        fs_dcm = dcm_ratio/(self.ckt['t_state13']+self.ckt['t_state24'])
+        ccm_hyst  = 1.1
+        if fs_dcm > 2*self.ip['fs']:
+            ton_mult=1
+            ip=self.ckt['ip']
+            ip['ton_mult']=ton_mult
+            lvl_config=ip['lvl_config']
+            self.ckt = {'2 level':circuit_params_2state(ip),
+                        '3 level':circuit_params_4state(ip)}\
+                        [lvl_config]
+            ipp = abs(self.ckt['deltaV']*self.ckt['t_for_deltaV']/self.ind['Lout']/1e-6)
+            dcm_ratio=1
+            
+        elif dcm_ratio > ccm_hyst:
+            ton_mult = 1
+            ip=self.ckt['ip']
+            ip['ton_mult']=ton_mult
+            lvl_config=ip['lvl_config']
+            self.ckt = {'2 level':circuit_params_2state(ip),
+                        '3 level':circuit_params_4state(ip)}\
+                        [lvl_config]
+            ipp = abs(self.ckt['deltaV']*self.ckt['t_for_deltaV']/self.ind['Lout']/1e-6)
+            dcm_ratio = self.idc/(ipp/2)
+
+        else:
+            dcm_ratio = self.idc/(ipp/2)
+            
+        self.ipp = ipp
+        self.dcm_ratio = min(1,dcm_ratio)
+        
+        
+        #self.ckt = 
+        # self.ton_mult = self.ckt['ton_mult']
+        # self.ipp = abs(self.ckt['deltaV']*self.ckt['t_for_deltaV']/Lparams['Lout']/1e-6)   
+        # self.dcm_ratio=min(1,self.idc/(self.ipp/2))
+    
     def pcore(self): 
         fs = self.fs_dcm
         return self.ind['Ka']*fs**(self.ind['Kx'])*(self.ind['Kb']*self.ipp)**self.ind['Ky']
@@ -57,6 +123,13 @@ def closest_value(input_list, input_value):
     i = (np.abs(arr - input_value)).argmin()
     return arr[i]
 
+def lparams(lout:float,df_ind_family):
+    lout_column = df_ind_family['Lout']
+    cv = closest_value(lout_column.tolist(),lout)
+    df_ind = df_ind_family[lout_column==cv]
+    return df_ind.to_dict('records')[0]
+
+#this next function should be unnecessary and depricated
 def ind_pdis_obj(ckt_params,lout:float,df_ind_family):
     cp=ckt_params.copy()
     lout_column = df_ind_family['Lout']
@@ -65,17 +138,31 @@ def ind_pdis_obj(ckt_params,lout:float,df_ind_family):
     lparams = df_ind.to_dict('records')[0]
     return Inductor_pdis(cp,lparams)
 
-def l_set(ckt_params,df_ind_family,inductor_list:list): #Ldict:dict):
-    cp=ckt_params.copy()
+#def l_set(ckt_params,ind_family:str,inductor_list:list): #Ldict:dict):
+def l_set(inp_params,ind_family:str,inductor_list:list): #Ldict:dict):
+    ip = inp_params.copy()
+    ip['lout']['family'] = ind_family
+    # cp = {'2 level':circuit_params_2state(ip),
+    #           '3 level':circuit_params_4state(ip)}\
+    #           [ip['lvl_config']]
+
+    #cp=ckt_params.copy()
+    #cp['ip']['lout']['family'] = ind_family
+    df_ind_family = create_ind_family_df(ind_family)
     #sheetname = family #Ldict["family"]
     #inductor_list = Ldict["Lout_values"]
     #df_ind_family = create_ind_family_df(family) #pd.read_excel(cyntec_filename,sheet_name = sheetname,engine='openpyxl')
-    inductor_set = {ind:ind_pdis_obj(cp,ind,df_ind_family) for ind in inductor_list if ind in df_ind_family['Lout'].tolist()}
+    def ip_replace_ind(ind):
+        ip['lout']['value(uH)'] = ind
+        return ip
+    #inductor_set = {ind:ind_pdis_obj(cp,ind,df_ind_family) for ind in inductor_list if ind in df_ind_family['Lout'].tolist()}
+    inductor_set = {ind:Inductor_pdis(ip_replace_ind(ind)) for ind in inductor_list if ind in df_ind_family['Lout'].tolist()}
     pset = [{'Lout':ind_obj.ind['Lout'],
              'Ptot':ind_obj.p_tot,
              'Pdc' :ind_obj.p_dc,
              'Pcore':ind_obj.p_core,
-             'Temp':ind_obj.t_winding
+             'Temp':ind_obj.t_winding,
+             'Fs':ind_obj.fs_dcm
             } for ind_obj in inductor_set.values()
            ]    
     return pd.merge(df_ind_family,pd.DataFrame.from_dict(pset))

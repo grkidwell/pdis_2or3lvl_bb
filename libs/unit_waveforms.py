@@ -52,7 +52,58 @@ class Four_state:
         else:
             k = 1-self.t1_unit_pulse(t)-self.t3_unit_pulse(t)-self.t4_unit_pulse(t)
         return k
+
+class Six_state:
     
+    def __init__(self,time_states):
+      
+        self.delta_t = time_states
+        self.t1=self.delta_t['t1']
+        self.t2=self.delta_t['t2']
+        self.t3=self.delta_t['t3']
+        self.t4=self.t1 #self.delta_t['t4']
+        self.t5=self.t2 #self.delta_t['t5']
+        self.t6=self.t3 #self.delta_t['t6']
+        self.Ts = sum(self.delta_t.values())
+    
+    def step(self,t):
+        if t<0:
+            kd=0.0
+        elif t==0:
+            kd=0.0
+        else:
+            kd=1.0
+        return kd
+            
+    def t1_unit_pulse(self,t):
+        if t<0:
+            k=0.0
+        elif t==0:
+            k=0.0
+        else:
+            k=self.step(self.t1-t)
+        return k
+    
+    def t6_unit_pulse(self,t):
+        return self.step(t-self.t1-self.t2-self.t3-self.t4-self.t5)
+      
+    def t5_unit_pulse(self,t):
+        return self.step(t-(self.t1+self.t2+self.t3+self.t4))-self.t6_unit_pulse(t)
+
+    def t4_unit_pulse(self,t):
+        return self.step(t-(self.t1+self.t2+self.t3))-(self.t5_unit_pulse(t)+self.t6_unit_pulse(t))
+
+    def t3_unit_pulse(self,t):
+        return self.step(t-(self.t1+self.t2))-(self.t4_unit_pulse(t)+self.t5_unit_pulse(t)+self.t6_unit_pulse(t))
+      
+    def t2_unit_pulse(self,t):
+        if t<0:
+            k=0.0
+        elif t==0:
+            k=0.0
+        else:
+            k = 1-self.t1_unit_pulse(t)-self.t3_unit_pulse(t)-self.t4_unit_pulse(t)-self.t5_unit_pulse(t)-selt.t6_unit_pulse(t)
+        return k
     
     def repeating(self,t):
         period=self.Ts
