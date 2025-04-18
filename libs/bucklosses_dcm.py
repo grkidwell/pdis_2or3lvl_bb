@@ -4,7 +4,9 @@ from circuit_4state import circuit_params as circuit_params_4state
 from circuit_2state import circuit_params as circuit_params_2state
 
 from controller import get_ic_params
-from cyntec import Inductor_pdis, create_ind_family_df, ind_pdis_obj, l_set, cyntec_filename
+from cyntec import Inductor_pdis, create_ind_family_df, ind_pdis_obj, l_set #, cyntec_filename
+from ihlp import Inductor_pdis as Inductor_pdis_ihlp
+#from ihlp import ihlp_filename
 import mosfet_hs_dcm as mosfet_hs
 import mosfet_ls_dcm as mosfet_ls # import get_fet_params, Fet_cap_vs_vds, Fet_switching_on, Fet_switching_off, Losses
 import mosfet_q4_dcm as mosfet_q4
@@ -32,7 +34,8 @@ class Buckconverter_losses:
         self.ls_p = mosfet_ls.get_fet_params(self.ip['lsfet_partnum'])
         self.q4_p = mosfet_q4.get_fet_params(self.ip['q4_partnum'])
         
-        self.lout_obj = Inductor_pdis(self.ip) #ckt_params) #ind_pdis_obj(self.ckt_params,self.ip['lout']['value(uH)'],create_ind_family_df(self.ip['lout']['family']))
+        #self.lout_obj = Inductor_pdis(self.ip) 
+        self.lout_obj = {True:Inductor_pdis_ihlp, False:Inductor_pdis}[self.is_ihlp()](self.ip)
         self.fs_dcm = self.lout_obj.fs_dcm   #inductor ripple frequency
         self.idc = self.lout_obj.idc*{'single':1,'series':1,'parallel':2}[self.ip['lout']['config']]
         self.ipp = self.lout_obj.ipp*{'single':1,'series':1,'parallel':2}[self.ip['lout']['config']]
@@ -102,6 +105,11 @@ class Buckconverter_losses:
             pshunt = p_shunt(rshunt,self.iin)
             self.p_summary['inp_shunt']=pshunt
             self.ptotal = self.ptotal+pshunt
+
+    def is_ihlp(self):
+        ind_fam = self.ip['lout']['family']
+        isihlp = ind_fam[:4]=='ihlp'
+        return isihlp
         
     
 def b_obj_var(inp_params:dict,variable:dict):

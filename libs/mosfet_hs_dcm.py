@@ -15,8 +15,16 @@ from unit_waveforms_turnon import Four_state
 mosfet_filename = r'data/mosfet_data.xlsx'
 
 def get_fet_params(partnumber:str):
-    df_fets=pd.read_excel(r'data/mosfet_data.xlsx')
-    df = df_fets
+    #df_fets=pd.read_excel(r'data/mosfet_data.xlsx')
+    df_fets=pd.read_excel(r'data/mosfet_data.xlsx', sheet_name='transpose')
+    df3 = df_fets.transpose().reset_index()#drop=True)       df2 doesn't exist and is legacy from test function
+    column_names = df3.iloc[0].values.tolist()
+    df3.columns=column_names
+    df3.drop(index=df3.index[0], axis=0, inplace=True)
+    df3.reset_index(inplace=True)
+    df3.drop(['index'],axis=1,inplace=True)
+    #df3[['multiplier']]=df3[['multiplier']].applymap('{:.0E}'.format)
+    df = df3 #df_fets
     paramdict = dict(df[['parameter',partnumber]].values)
     unitdict = dict(df[['parameter','units']].values)
     scalefactors = dict(df[['parameter','multiplier']].values)
