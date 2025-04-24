@@ -16,6 +16,7 @@ mosfet_filename = r'data/mosfet_data.xlsx'
 def get_fet_params(partnumber:str):
     #df_fets=pd.read_excel(r'data/mosfet_data.xlsx')
     df_fets=pd.read_excel(r'data/mosfet_data.xlsx', sheet_name='transpose')
+    #yes, we are tranposing the transposed sheet.  didn't feel like changing the rest of the code
     df3 = df_fets.transpose().reset_index()#drop=True)       df2 doesn't exist and is legacy from test function
     column_names = df3.iloc[0].values.tolist()
     df3.columns=column_names
