@@ -36,11 +36,11 @@ class Fet_cap_vs_vds:
     def __init__(self,fetparams,vds):
         self.fetparams = fetparams
         self.vds    = vds
-        self.cgd_0V = 720e-12 #self.fetparams['Ciss_0V']-self.c_gs() #may need to adjust this value if result of function is negative
+        self.cgd_0V = max(self.fetparams['Crss_1V']+100e-12,self.fetparams['Ciss_0V']-self.c_gs()) #720e-12 #may need to adjust this value if result of function is negative
 
     def c_gs(self):
         fp=self.fetparams
-        return fp['Ciss_Vds2']-fp['Crss_Vds2'] #fp['Ciss_0V']-fp['Crss_1V']*1.2  #20% multiplier for 0V/1V
+        return  max(220e-12,fp['Ciss_0V']-fp['Crss_1V'])  #20% multiplier for 0V/1V,   or fp['Ciss_Vds2']-fp['Crss_Vds2']
 
     def c_gd(self,v_ds:float):
         fp=self.fetparams
@@ -48,8 +48,11 @@ class Fet_cap_vs_vds:
         c_gd_v2 = fp['Crss_Vds2']
         c_gd_1V = fp['Crss_1V']
         a = (1/c_gd_v2-1/self.cgd_0V)
-        b = (1/c_gd_1V-1/self.cgd_0V)
-        x = math.log(a/b)/math.log(fp['Vds2'])
+        
+        b = max(1e8,(1/c_gd_1V-1/self.cgd_0V))
+        
+        ratio = a/b #max(2,a/b)
+        x = math.log(ratio)/math.log(fp['Vds2'])
         c_j2 = 1/(1/c_gd_1V-1/self.cgd_0V)
         return 1/(1/self.cgd_0V+v_ds**x/c_j2)
     
@@ -141,8 +144,15 @@ class Losses:
 
     def qrr(self):
             lsp=self.lsfet_params
+            qrr_ls = lsp['Qrr']
             qoss = self.fet_cap.q_oss(lsp['Vds_qrr'])
-            return max((lsp['Qrr']-qoss)/lsp['Id_qrr']*self.i_valley,0)
+            # if qrr_ls > qoss:
+            #     qrr_net = qrr_ls-qoss
+            # else:
+            #     qrr_net = qrr_ls
+            qrr_net = qrr_ls
+            return max((qrr_net)/lsp['Id_qrr']*self.i_valley,0)
+            #return max((lsp['Qrr']-qoss)/lsp['Id_qrr']*self.i_valley,0)
             #if qoss>qrr then qrr losses aren't counted which makes no sense
             #return lsp['Qrr']*(self.i_valley/lsp['Id_qrr'])**0.5
 

@@ -36,22 +36,26 @@ class Fet_cap_vs_vds:
     def __init__(self,fetparams,vds):
         self.fetparams = fetparams
         self.vds    = vds
-        self.cgd_0V = 420e-12 #self.fetparams['Ciss_0V']-self.c_gs() #may need to adjust this value if result of function is negative
+        self.cgd_0V =  max(self.fetparams['Crss_1V']+100e-12,self.fetparams['Ciss_0V']-self.c_gs())# 420e-12  #may need to adjust this value if result of function is negative
 
     def c_gs(self):
         fp=self.fetparams
-        return fp['Ciss_Vds2']-fp['Crss_Vds2'] #fp['Ciss_0V']-fp['Crss_1V']*1.2  #20% multiplier for 0V/1V
+        return max(220e-12,fp['Ciss_0V']-fp['Crss_1V']) #fp['Ciss_Vds2']-fp['Crss_Vds2'] 
 
     def c_gd(self,v_ds:float):
         fp=self.fetparams
-        #c_gd_0V = fp['Ciss_0V']-self.c_gs() #may need to adjust this value if result of function is negative
+        cgd_0V = self.cgd_0V
+        #cgd_0V = fp['Ciss_0V']-self.c_gs() #may need to adjust this value if result of function is negative
         c_gd_v2 = fp['Crss_Vds2']
         c_gd_1V = fp['Crss_1V']
-        a = (1/c_gd_v2-1/self.cgd_0V)
-        b = (1/c_gd_1V-1/self.cgd_0V)
-        x = math.log(a/b)/math.log(fp['Vds2'])
-        c_j2 = 1/(1/c_gd_1V-1/self.cgd_0V)
-        return 1/(1/self.cgd_0V+v_ds**x/c_j2)
+        a = (1/c_gd_v2-1/cgd_0V)
+        b = max(1e8,(1/c_gd_1V-1/self.cgd_0V))
+        ratio = a/b #max(8,a/b)
+        #print(a/b)
+        #ratio = a/b
+        x = math.log(ratio)/math.log(fp['Vds2'])
+        c_j2 = 1/(1/c_gd_1V-1/cgd_0V)
+        return 1/(1/cgd_0V+v_ds**x/c_j2)
     
     def c_ds(self,v_ds:float):
         fp=self.fetparams
