@@ -7,5 +7,6 @@ PROJECT_ROOT = os.path.abspath(os.path.join(
 '''
 libdir=os.getcwd()
 sys.path.append(libdir)
-sys.path.append(libdir+r'\libs')
+sys.path.append(libdir+r'\libs')  #windows
+sys.path.append(libdir+r'/libs')  #linux
 #print("ran code")
