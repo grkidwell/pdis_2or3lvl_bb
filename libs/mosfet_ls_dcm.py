@@ -142,19 +142,23 @@ class Losses:
         i_fetrms = ((self.idc**2+self.ipp**2/12)*t_Qls/self.ts)**0.5
         return i_fetrms**2*rdson 
 
-    def qrr(self):
+    def qrr(self,*args:tuple):
             lsp=self.lsfet_params
             qrr_ls = lsp['Qrr']
             qoss = self.fet_cap.q_oss(lsp['Vds_qrr'])
-            # if qrr_ls > qoss:
-            #     qrr_net = qrr_ls-qoss
-            # else:
-            #     qrr_net = qrr_ls
+            if 'print' in args:
+                print(f'qrr: {qrr_ls}')
+                print(f'qoss: {qoss}')
+            if qrr_ls > qoss:
+                qrr_net = qrr_ls-qoss
+            else:
+                qrr_net = qrr_ls
             qrr_net = qrr_ls
-            return max((qrr_net)/lsp['Id_qrr']*self.i_valley,0)
+            return max(qrr_net,0)
+            #return max((qrr_net)*(self.i_valley/lsp['Id_qrr'])**0.5,0)
             #return max((lsp['Qrr']-qoss)/lsp['Id_qrr']*self.i_valley,0)
             #if qoss>qrr then qrr losses aren't counted which makes no sense
-            #return lsp['Qrr']*(self.i_valley/lsp['Id_qrr'])**0.5
+            #return max(lsp['Qrr']*(self.i_valley/lsp['Id_qrr'])**0.5,0)
 
     def ring_f(self):
         qoss_vphase = self.fet_cap.q_oss(self.vds)
