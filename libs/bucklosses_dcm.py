@@ -79,7 +79,8 @@ class Buckconverter_losses:
                         'q4 fet':sum(list(self.p_q4.values())),
                         'lout':sum(list(self.p_lout.values())),
                         'caps':sum(list(self.p_caps.values())),
-                        'ic_with_gate' : self.p_summary['ic']+(self.p_summary['hs gate']*self.ip['m_hs']+self.p_summary['ls gate']*self.ip['m_ls'])*{'2 level':1,'3 level':2}[self.lvl_config]}
+                        'ic_with_gate' : self.p_summary['ic']+(self.p_summary['hs gate']*self.ip['m_hs']+self.p_summary['ls gate']*self.ip['m_ls'])*{'2 level':1,'3 level':2}[self.lvl_config],
+                        'board cu':self.p_cu}
 
         
         self.ptotal = (self.p_totals['hs fet']*self.ip['m_hs']+self.p_totals['ls fet']*self.ip['m_ls'])*{'2 level':1,'3 level':2}[self.lvl_config]+ \
@@ -105,6 +106,7 @@ class Buckconverter_losses:
             pshunt = p_shunt(rshunt,self.iin)
             self.p_summary['inp_shunt']=pshunt
             self.ptotal = self.ptotal+pshunt
+            self.p_totals['inp_shunt'] = pshunt
 
     def is_ihlp(self):
         ind_fam = self.ip['lout']['family']

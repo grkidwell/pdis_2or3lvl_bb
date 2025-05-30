@@ -322,7 +322,7 @@ class Fet_switching_on:
     def plot_vgs_id_vds(self): #list of dataframes
         def whole_sequence_t(t):
             return self.whole_sequence(t=t)
-        tfinal = 20e-9
+        tfinal = 40e-9
         numdatapoints=1000  
         tstep = np.round(tfinal/numdatapoints,14)
         tarray=np.arange(0,tfinal,tstep, dtype=float)
@@ -338,8 +338,9 @@ class Fet_switching_on:
 
         f = plt.figure(figsize=(6,3))
         ax = f.add_subplot()
+        ax2 = ax.twinx()
         
-        ax.plot(tarray*1e9,vgs, 'r')
+        ax2.plot(tarray*1e9,vgs, 'r')
         ax.plot(tarray*1e9,id, 'b')
         ax.plot(tarray*1e9,vds, 'g')
         ax.plot(tarray*1e9,pds, 'm')
@@ -576,8 +577,8 @@ class Fet_switching_off:
 
         f = plt.figure(figsize=(6,3))
         ax = f.add_subplot()
-        
-        ax.plot(tarray*1e9,vgs, 'r')
+        ax2 = ax.twinx()
+        ax2.plot(tarray*1e9,vgs, 'r')
         ax.plot(tarray*1e9,id, 'b')
         ax.plot(tarray*1e9,vds, 'g')
         ax.plot(tarray*1e9,pds, 'm')

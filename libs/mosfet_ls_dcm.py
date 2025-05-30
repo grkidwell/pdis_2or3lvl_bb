@@ -96,6 +96,7 @@ class Losses:
         self.lsfp=self.lsfet_params
         self.idc = idc/self.m_ls; self.ipp = ipp/self.m_ls
         self.ckt_params = ckt_params        
+        self.ip = self.ckt_params['ip']
         self.state_count = self.ckt_params['state count']
         self.ts = {4:(2*self.ckt_params['t_state13']+2*self.ckt_params['t_state24']),
                    2:self.ckt_params['t_state13']+self.ckt_params['t_state24']}[self.state_count]
@@ -142,7 +143,7 @@ class Losses:
         i_fetrms = ((self.idc**2+self.ipp**2/12)*t_Qls/self.ts)**0.5
         return i_fetrms**2*rdson 
 
-    def qrr(self,*args:tuple):
+    def qrr(self,*args:str):
             lsp=self.lsfet_params
             qrr_ls = lsp['Qrr']
             qoss = self.fet_cap.q_oss(lsp['Vds_qrr'])
@@ -154,13 +155,18 @@ class Losses:
             else:
                 qrr_net = qrr_ls
             qrr_net = qrr_ls
+            if 'qrr_vs_i' not in self.ip.keys():
+                self.ip['qrr_vs_i'] = 'constant'
+            qrr_exp = {'constant':0,'linear':1,'sqrt':0.5}[self.ip['qrr_vs_i']]
+            qrr_net = qrr_net*(self.i_valley/lsp['Id_qrr'])**qrr_exp
+            # if 'linear' in args:
+            #     qrr_net = qrr_net*self.i_valley/lsp['Id_qrr']
+            # elif 'sqrt' in args:
+            #     qrr_net = qrr_net*(self.i_valley/lsp['Id_qrr'])**0.5
             return max(qrr_net,0)
-            #return max((qrr_net)*(self.i_valley/lsp['Id_qrr'])**0.5,0)
-            #return max((lsp['Qrr']-qoss)/lsp['Id_qrr']*self.i_valley,0)
             #if qoss>qrr then qrr losses aren't counted which makes no sense
-            #return max(lsp['Qrr']*(self.i_valley/lsp['Id_qrr'])**0.5,0)
 
-    def ring_f(self):
+    def ring_f(self):   
         qoss_vphase = self.fet_cap.q_oss(self.vds)
         return (self.vds*self.qrr()+qoss_vphase/2*self.vds)*self.fs
         
