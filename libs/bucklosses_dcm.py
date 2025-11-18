@@ -22,7 +22,9 @@ from current_shunt import p_shunt
 
 class Buckconverter_losses:
     def __init__(self,inp_params:dict):
-        self.ip = inp_params
+        self.ip = inp_params.copy()
+        if 'iout' not in self.ip:
+            self.ip['iout']=self.ip['pin']/self.ip['vout']*self.ip['eff']
         self.cont_p = get_ic_params(self.ip['controller'])
         self.lvl_config = self.ip['lvl_config']        
         self.ckt_params = {'2 level':circuit_params_2state(self.ip),

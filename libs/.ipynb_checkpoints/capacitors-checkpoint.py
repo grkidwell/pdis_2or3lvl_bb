@@ -40,7 +40,10 @@ class Caplosses:
         cap = self.caps['vin']
         esr_equiv = cap['esr']/cap['n']
         d = self.ckt_params['t_Qhs']/self.ts
+
+        #need to re-derive this for both 4state and 2state and for dcm
         irms_4state = self.idc*(d*(1-d)+d*(1-d)**2*self.ipp**2/12)**0.5
+        
         return irms_4state**2*esr_equiv
 
     def p_outputcap(self):

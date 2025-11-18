@@ -588,6 +588,7 @@ class Losses:
         self.args=args
         self.ic_params,self.hsfet_params,lsfet_params,self.vds,self.vgate,self.rboot,self.idc,self.ipp,self.m_hs,m_ls,rd = self.args        
         self.ckt_params = ckt_params 
+        self.ip = self.ckt_params['ip']
         self.state_count = self.ckt_params['state count']
         self.ts = {4:(2*self.ckt_params['t_state13']+2*self.ckt_params['t_state24']),
                    2:self.ckt_params['t_state13']+self.ckt_params['t_state24']}[self.state_count]
@@ -596,17 +597,34 @@ class Losses:
         self.fet_switch_off_obj = Fet_switching_off(self.args)        
         self.summary = {'sw_on':self.fs*self.fet_switch_on_obj.e_on(),
                         'sw_off':self.fs*self.fet_switch_off_obj.e_off(),
-                        'cond': self.cond_f(),
                         'ring': self.ring_f(),
                         'gate': self.gate_f()}
-    
+        if ('tcomponents' in self.ip and
+            'hs' in self.ip['tcomponents'] and
+            isinstance(self.ip['tcomponents']['hs'],int)):
+            self.temp = self.ip['tcomponents']['hs']
+        else:
+            self.temp = self.temp_f()
+        self.summary['cond'] = self.cond_f()
+                        
+    def temp_f(self):
+        pfixed = sum([val for key,val in self.summary.items() if key in ['sw_on','sw_off','ring']])
+        Rth = self.hsfet_params['RthJA']
+        tamb = self.ckt_params['Tamb']
+        tempco = 3500e-6
+        rdson_25C = {5:self.hsfet_params['Rdson_4.5V'],10:self.hsfet_params['Rdson_10V']}[self.vgate]
+        t_Qhs = self.ckt_params['t_Qhs']
+        i_fetrms = (((self.idc**2+self.ipp**2/12)*t_Qhs/self.ts)**0.5)/self.m_hs
+        rdson_term = i_fetrms**2*rdson_25C
+        return abs(((25*tempco-1)*rdson_term-tamb-pfixed*Rth)/(rdson_term*tempco-1))
+        
     def cond_f(self):
-        tcoeff = 3500e-6
-        tmult = tcoeff*(self.ckt_params['Tamb']-25)
+        tempco = 3500e-6
+        tmult = tempco*(self.temp-25)
         rdson = {5:self.hsfet_params['Rdson_4.5V'],10:self.hsfet_params['Rdson_10V']}[self.vgate]*(1+tmult)
         t_Qhs = self.ckt_params['t_Qhs']
         i_fetrms = (((self.idc**2+self.ipp**2/12)*t_Qhs/self.ts)**0.5)/self.m_hs
-        return i_fetrms**2*rdson 
+        return i_fetrms**2*rdson
 
     def ring_f(self):
         fet_ds_ring_pk = self.fet_switch_off_obj.vds_ringpk #this must be called after e_off

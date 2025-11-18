@@ -112,9 +112,16 @@ class Losses:
         self.fet_cap = Fet_cap_vs_vds(self.lsfp,self.vds)
         self.summary = {'bd_on':self.bd_f()['on'],
                         'bd_off':self.bd_f()['off'],
-                        'cond': self.cond_f(),
                         'ring': self.ring_f(),
                         'gate': self.gate_f()}
+        if ('tcomponents' in self.ip and
+            'ls' in self.ip['tcomponents'] and
+            isinstance(self.ip['tcomponents']['ls'],int)):
+            self.temp = self.ip['tcomponents']['ls']
+        else:
+            self.temp = self.temp_f()
+        self.summary['cond'] =  self.cond_f()
+                        
 
     
     def vfwd(self,ifw):
@@ -135,12 +142,23 @@ class Losses:
                 'tgsf':t_gsf,
                 't_bd_off':t_bd_off} 
                 
+    def temp_f(self):
+        pfixed = sum([val for key,val in self.summary.items() if key in ['bd_on','bd_off','ring']])
+        Rth = self.lsfet_params['RthJA']
+        tamb = self.ckt_params['Tamb']
+        tempco = 3500e-6
+        rdson_25C = {5:self.lsfet_params['Rdson_4.5V'],10:self.lsfet_params['Rdson_10V']}[self.vgate]
+        t_Qls = self.ckt_params['t_Qls']
+        i_fetrms = (((self.idc**2+self.ipp**2/12)*t_Qls/self.ts)**0.5)/self.m_ls
+        rdson_term = i_fetrms**2*rdson_25C
+        return abs(((25*tempco-1)*rdson_term-tamb-pfixed*Rth)/(rdson_term*tempco-1))
+        
     def cond_f(self):
         tcoeff = 3500e-6
-        tmult = tcoeff*(self.ckt_params['Tamb']-25)
+        tmult = tcoeff*(self.temp-25)
         rdson = {5:self.lsfet_params['Rdson_4.5V'],10:self.lsfet_params['Rdson_10V']}[self.vgate]*(1+tmult)
         t_Qls = self.ckt_params['t_Qls']
-        i_fetrms = ((self.idc**2+self.ipp**2/12)*t_Qls/self.ts)**0.5
+        i_fetrms = ((self.idc**2+self.ipp**2/12)*t_Qls/self.ts)**0.5/self.m_ls
         return i_fetrms**2*rdson 
 
     def qrr(self,*args:str):

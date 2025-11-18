@@ -14,8 +14,17 @@ import numdifftools as nd
 mosfet_filename = r'data/mosfet_data.xlsx'
 
 def get_fet_params(partnumber:str):
-    df_fets=pd.read_excel(r'data/mosfet_data.xlsx')
-    df = df_fets
+    #df_fets=pd.read_excel(r'data/mosfet_data.xlsx')
+    df_fets=pd.read_excel(r'data/mosfet_data.xlsx', sheet_name='transpose')
+    #yes, we are tranposing the transposed sheet.  didn't feel like changing the rest of the code
+    df3 = df_fets.transpose().reset_index()#drop=True)       df2 doesn't exist and is legacy from test function
+    column_names = df3.iloc[0].values.tolist()
+    df3.columns=column_names
+    df3.drop(index=df3.index[0], axis=0, inplace=True)
+    df3.reset_index(inplace=True)
+    df3.drop(['index'],axis=1,inplace=True)
+    #df3[['multiplier']]=df3[['multiplier']].applymap('{:.0E}'.format)
+    df = df3 #df_fets
     paramdict = dict(df[['parameter',partnumber]].values)
     unitdict = dict(df[['parameter','units']].values)
     scalefactors = dict(df[['parameter','multiplier']].values)
@@ -27,11 +36,11 @@ class Fet_cap_vs_vds:
     def __init__(self,fetparams,vds):
         self.fetparams = fetparams
         self.vds    = vds
-        self.cgd_0V = 720e-12 #self.fetparams['Ciss_0V']-self.c_gs() #may need to adjust this value if result of function is negative
+        self.cgd_0V = max(self.fetparams['Crss_1V']+100e-12,self.fetparams['Ciss_0V']-self.c_gs()) #720e-12 #may need to adjust this value if result of function is negative
 
     def c_gs(self):
         fp=self.fetparams
-        return fp['Ciss_Vds2']-fp['Crss_Vds2'] #fp['Ciss_0V']-fp['Crss_1V']*1.2  #20% multiplier for 0V/1V
+        return  max(220e-12,fp['Ciss_0V']-fp['Crss_1V'])  #20% multiplier for 0V/1V,   or fp['Ciss_Vds2']-fp['Crss_Vds2']
 
     def c_gd(self,v_ds:float):
         fp=self.fetparams
@@ -39,8 +48,11 @@ class Fet_cap_vs_vds:
         c_gd_v2 = fp['Crss_Vds2']
         c_gd_1V = fp['Crss_1V']
         a = (1/c_gd_v2-1/self.cgd_0V)
-        b = (1/c_gd_1V-1/self.cgd_0V)
-        x = math.log(a/b)/math.log(fp['Vds2'])
+        
+        b = max(1e8,(1/c_gd_1V-1/self.cgd_0V))
+        
+        ratio = a/b #max(2,a/b)
+        x = math.log(ratio)/math.log(fp['Vds2'])
         c_j2 = 1/(1/c_gd_1V-1/self.cgd_0V)
         return 1/(1/self.cgd_0V+v_ds**x/c_j2)
     
@@ -84,6 +96,7 @@ class Losses:
         self.lsfp=self.lsfet_params
         self.idc = idc/self.m_ls; self.ipp = ipp/self.m_ls
         self.ckt_params = ckt_params        
+        self.ip = self.ckt_params['ip']
         self.state_count = self.ckt_params['state count']
         self.ts = {4:(2*self.ckt_params['t_state13']+2*self.ckt_params['t_state24']),
                    2:self.ckt_params['t_state13']+self.ckt_params['t_state24']}[self.state_count]
@@ -99,9 +112,16 @@ class Losses:
         self.fet_cap = Fet_cap_vs_vds(self.lsfp,self.vds)
         self.summary = {'bd_on':self.bd_f()['on'],
                         'bd_off':self.bd_f()['off'],
-                        'cond': self.cond_f(),
                         'ring': self.ring_f(),
                         'gate': self.gate_f()}
+        if ('tcomponents' in self.ip and
+            'ls' in self.ip['tcomponents'] and
+            isinstance(self.ip['tcomponents']['ls'],int)):
+            self.temp = self.ip['tcomponents']['ls']
+        else:
+            self.temp = self.temp_f()
+        self.summary['cond'] =  self.cond_f()
+                        
 
     
     def vfwd(self,ifw):
@@ -122,22 +142,49 @@ class Losses:
                 'tgsf':t_gsf,
                 't_bd_off':t_bd_off} 
                 
+    def temp_f(self):
+        pfixed = sum([val for key,val in self.summary.items() if key in ['bd_on','bd_off','ring']])
+        Rth = self.lsfet_params['RthJA']
+        tamb = self.ckt_params['Tamb']
+        tempco = 3500e-6
+        rdson_25C = {5:self.lsfet_params['Rdson_4.5V'],10:self.lsfet_params['Rdson_10V']}[self.vgate]
+        t_Qls = self.ckt_params['t_Qls']
+        i_fetrms = (((self.idc**2+self.ipp**2/12)*t_Qls/self.ts)**0.5)/self.m_ls
+        rdson_term = i_fetrms**2*rdson_25C
+        return abs(((25*tempco-1)*rdson_term-tamb-pfixed*Rth)/(rdson_term*tempco-1))
+        
     def cond_f(self):
         tcoeff = 3500e-6
-        tmult = tcoeff*(self.ckt_params['Tamb']-25)
+        tmult = tcoeff*(self.temp-25)
         rdson = {5:self.lsfet_params['Rdson_4.5V'],10:self.lsfet_params['Rdson_10V']}[self.vgate]*(1+tmult)
         t_Qls = self.ckt_params['t_Qls']
-        i_fetrms = ((self.idc**2+self.ipp**2/12)*t_Qls/self.ts)**0.5
+        i_fetrms = ((self.idc**2+self.ipp**2/12)*t_Qls/self.ts)**0.5/self.m_ls
         return i_fetrms**2*rdson 
 
-    def qrr(self):
+    def qrr(self,*args:str):
             lsp=self.lsfet_params
+            qrr_ls = lsp['Qrr']
             qoss = self.fet_cap.q_oss(lsp['Vds_qrr'])
-            #old return max((lsp['Qrr']-qoss)/lsp['Id_qrr']*self.i_valley,0)
+            if 'print' in args:
+                print(f'qrr: {qrr_ls}')
+                print(f'qoss: {qoss}')
+            if qrr_ls > qoss:
+                qrr_net = qrr_ls-qoss
+            else:
+                qrr_net = qrr_ls
+            qrr_net = qrr_ls
+            if 'qrr_vs_i' not in self.ip.keys():
+                self.ip['qrr_vs_i'] = 'constant'
+            qrr_exp = {'constant':0,'linear':1,'sqrt':0.5}[self.ip['qrr_vs_i']]
+            qrr_net = qrr_net*(self.i_valley/lsp['Id_qrr'])**qrr_exp
+            # if 'linear' in args:
+            #     qrr_net = qrr_net*self.i_valley/lsp['Id_qrr']
+            # elif 'sqrt' in args:
+            #     qrr_net = qrr_net*(self.i_valley/lsp['Id_qrr'])**0.5
+            return max(qrr_net,0)
             #if qoss>qrr then qrr losses aren't counted which makes no sense
-            return lsp['Qrr']*(self.i_valley/lsp['Id_qrr'])**0.5
 
-    def ring_f(self):
+    def ring_f(self):   
         qoss_vphase = self.fet_cap.q_oss(self.vds)
         return (self.vds*self.qrr()+qoss_vphase/2*self.vds)*self.fs
         
@@ -145,4 +192,4 @@ class Losses:
         ciss_0V = self.lsfet_params['Ciss_0V']
         qfet_gate = self.vgate*ciss_0V
         vbias = {'no':self.vgate,'yes':self.ckt_params['vin']}[self.ic_params['ldo']]
-        return qfet_gate*self.vgate*(1/2+vbias/self.vgate/2)*self.fs
+        return qfet_gate*self.vgate*(vbias/self.vgate)*self.fs

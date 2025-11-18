@@ -1,9 +1,12 @@
+# uses modified cyntec model with simplified input parameter dependent variable
 
 from circuit_4state import circuit_params as circuit_params_4state
 from circuit_2state import circuit_params as circuit_params_2state
 
 from controller import get_ic_params
-from cyntec import Inductor_pdis, create_ind_family_df, ind_pdis_obj, l_set, cyntec_filename
+from cyntec import Inductor_pdis, create_ind_family_df, ind_pdis_obj, l_set #, cyntec_filename
+from ihlp import Inductor_pdis as Inductor_pdis_ihlp
+#from ihlp import ihlp_filename
 import mosfet_hs_dcm as mosfet_hs
 import mosfet_ls_dcm as mosfet_ls # import get_fet_params, Fet_cap_vs_vds, Fet_switching_on, Fet_switching_off, Losses
 import mosfet_q4_dcm as mosfet_q4
@@ -19,27 +22,28 @@ from current_shunt import p_shunt
 
 class Buckconverter_losses:
     def __init__(self,inp_params:dict):
-        self.ip = inp_params
+        self.ip = inp_params.copy()
+        if 'iout' not in self.ip:
+            self.ip['iout']=self.ip['pin']/self.ip['vout']*self.ip['eff']
         self.cont_p = get_ic_params(self.ip['controller'])
         self.lvl_config = self.ip['lvl_config']        
-        self.ckt_params = {'2 level':circuit_params_2state(self.ip['vin'],self.ip['vout'],self.ip['iout'],self.ip['fs'],
-                                                           self.ip['tambient'],self.ip['lout']['config']),
-                           '3 level':circuit_params_4state(self.ip['vin'],self.ip['vout'],self.ip['iout'],self.ip['fs'],
-                                                           self.ip['tambient'],self.ip['lout']['config'])}\
-                           [self.lvl_config]
+        self.ckt_params = {'2 level':circuit_params_2state(self.ip),
+                           '3 level':circuit_params_4state(self.ip)}[self.lvl_config]
         self.vds = self.ckt_params['vphase']
         self.vgate = self.ip['vgate']
+        self.rboot = self.ip['rboot']
         self.hs_p = mosfet_hs.get_fet_params(self.ip['hsfet_partnum'])
         self.ls_p = mosfet_ls.get_fet_params(self.ip['lsfet_partnum'])
         self.q4_p = mosfet_q4.get_fet_params(self.ip['q4_partnum'])
         
-        self.lout_obj = ind_pdis_obj(self.ckt_params,self.ip['lout']['value(uH)'],create_ind_family_df(self.ip['lout']['family']))
+        #self.lout_obj = Inductor_pdis(self.ip) 
+        self.lout_obj = {True:Inductor_pdis_ihlp, False:Inductor_pdis}[self.is_ihlp()](self.ip)
         self.fs_dcm = self.lout_obj.fs_dcm   #inductor ripple frequency
         self.idc = self.lout_obj.idc*{'single':1,'series':1,'parallel':2}[self.ip['lout']['config']]
         self.ipp = self.lout_obj.ipp*{'single':1,'series':1,'parallel':2}[self.ip['lout']['config']]
 
-        self.p_lout = self.lout_obj.summary
-        self.hs_Losses_obj = mosfet_hs.Losses(self.ckt_params,self.fs_dcm,self.cont_p,self.hs_p,self.ls_p,self.vds,self.vgate,self.idc,self.ipp,
+        self.p_lout = {param:value for param,value in self.lout_obj.summary.items() if param in ['dcr','core']}
+        self.hs_Losses_obj = mosfet_hs.Losses(self.ckt_params,self.fs_dcm,self.cont_p,self.hs_p,self.ls_p,self.vds,self.vgate,self.rboot,self.idc,self.ipp,
                                      self.ip['m_hs'],self.ip['m_ls'],self.ip['rd'])
         self.p_hs = self.hs_Losses_obj.summary 
         self.ls_losses_obj = mosfet_ls.Losses(self.ckt_params,self.fs_dcm,self.cont_p,self.hs_p,self.ls_p,self.vds,self.vgate,self.idc,self.ipp,
@@ -77,7 +81,8 @@ class Buckconverter_losses:
                         'q4 fet':sum(list(self.p_q4.values())),
                         'lout':sum(list(self.p_lout.values())),
                         'caps':sum(list(self.p_caps.values())),
-                        'ic_with_gate' : self.p_summary['ic']+(self.p_summary['hs gate']*self.ip['m_hs']+self.p_summary['ls gate']*self.ip['m_ls'])}
+                        'ic_with_gate' : self.p_summary['ic']+(self.p_summary['hs gate']*self.ip['m_hs']+self.p_summary['ls gate']*self.ip['m_ls'])*{'2 level':1,'3 level':2}[self.lvl_config],
+                        'board cu':self.p_cu}
 
         
         self.ptotal = (self.p_totals['hs fet']*self.ip['m_hs']+self.p_totals['ls fet']*self.ip['m_ls'])*{'2 level':1,'3 level':2}[self.lvl_config]+ \
@@ -90,10 +95,12 @@ class Buckconverter_losses:
         self.input_shunt_calc() 
 
         
-        self.efficiency = round(self.ip['vout']*self.ip['iout']/(self.ip['vout']*self.ip['iout'] + self.ptotal),3)
+        self.efficiency = round(self.ip['vout']*self.ip['iout']/(self.ip['vout']*self.ip['iout'] + self.ptotal),4)
         self.p_totals['total']=self.ptotal
         self.p_totals['efficiency']=self.efficiency
-        self.p_totals = {key:round(value,3) for key,value in self.p_totals.items()}
+        self.p_totals['Fs']=self.fs_dcm
+        self.p_totals = {key:round(value,4) for key,value in self.p_totals.items()}
+        self.summary = self.p_summary | self.p_totals
                 
     def input_shunt_calc(self):
         if 'r_shunt_input' in self.ip.keys():
@@ -101,6 +108,12 @@ class Buckconverter_losses:
             pshunt = p_shunt(rshunt,self.iin)
             self.p_summary['inp_shunt']=pshunt
             self.ptotal = self.ptotal+pshunt
+            self.p_totals['inp_shunt'] = pshunt
+
+    def is_ihlp(self):
+        ind_fam = self.ip['lout']['family']
+        isihlp = ind_fam[:4]=='ihlp'
+        return isihlp
         
     
 def b_obj_var(inp_params:dict,variable:dict):

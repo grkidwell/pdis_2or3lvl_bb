@@ -1,4 +1,4 @@
-
+ 
 def up_flag(vin,vout): #duty_under50pct(vin,vout):
     return vout>vin/2
 

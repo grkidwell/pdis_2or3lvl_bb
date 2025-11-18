@@ -53,6 +53,10 @@ class Four_state:
             k = 1-self.t1_unit_pulse(t)-self.t3_unit_pulse(t)-self.t4_unit_pulse(t)
         return k
 
+    def repeating(self,t):
+        period=self.Ts
+        return t-(t//period)*period
+
 class Six_state:
     
     def __init__(self,time_states):

@@ -24,7 +24,7 @@ class Losses:
 
     def cond_f(self):
         tcoeff = 3500e-6
-        tmult = tcoeff*(self.inp_params['tambient']-25)
+        tmult = 0 #tcoeff*(self.inp_params['tambient']-25)
         rdson = {5:self.q3_params['Rdson_4.5V'],10:self.q3_params['Rdson_10V']}[self.vgate]*(1+tmult)
         return self.i_fetrms**2*rdson 
         

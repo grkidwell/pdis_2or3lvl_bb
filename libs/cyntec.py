@@ -21,6 +21,7 @@ class Inductor_pdis:
               [self.ip['lvl_config']]
         #self.ckt = ckt_params #.copy()
         l_ip = self.ckt['ip']['lout']
+
         self.ind = lparams(l_ip['value(uH)'],create_ind_family_df(l_ip['family']))   #Lparams.copy()
         self.idc = self.ckt['Idc']
         
@@ -46,7 +47,22 @@ class Inductor_pdis:
         self.ind['K1']=0  #no ac winding loss.  see winding_temp.py
         self.p_core    = self.pcore()#self.ckt,Lparams)
         self.tempco = 1/(234.45+25)
-        self.t_winding = round(dcr_temp(self.irms_dcm,self.ckt,self.ind,self.p_core,self.tempco),1)
+        # self.t_winding = {False: round(dcr_temp(self.irms_dcm,self.ckt,self.ind,self.p_core,self.tempco),1),
+        #                   True: tamb}[noselfheat]
+        # if ('temp' in l_ip) and isinstance(l_ip['temp'],int):
+        #     self.t_winding = l_ip['temp']
+        # else:
+        #     self.t_winding = round(dcr_temp(self.irms_dcm,self.ckt,self.ind,self.p_core,self.tempco),1)
+
+        if ('tcomponents' in self.ip and
+            'lout' in self.ip['tcomponents'] and
+            isinstance(self.ip['tcomponents']['lout'],int)):
+            self.t_winding = self.ip['tcomponents']['lout']
+        else:
+            self.t_winding = round(dcr_temp(self.irms_dcm,self.ckt,self.ind,self.p_core,self.tempco),1)
+        
+        # print({False: round(dcr_temp(self.irms_dcm,self.ckt,self.ind,self.p_core,self.tempco),1),
+        #                   True: tamb}[noselfheat])
         self.DCR = self.ind['DCR']*(1+self.tempco*(self.t_winding-25))
         #self.p_ac = Lparams['K1']*self.ipp**2*ckt_params['fs']**0.5*self.DCR
         #self.p_dc = self.DCR*self.idc**2

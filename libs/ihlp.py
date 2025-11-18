@@ -93,7 +93,7 @@ class Inductor_pdis:
         #etckt = ckt_params['deltaV']*ckt_params['t_for_deltaV']/1e-6
         #bpk = etckt/Lparams['ET100']*100
         #d = ckt_params['duty']; fs = ckt_params['fs_phase']
-        etckt = self.ckt['deltaV']*self.ckt['t_for_deltaV']/1e-6
+        etckt = abs(self.ckt['deltaV']*self.ckt['t_for_deltaV']/1e-6)
         bpk = etckt/self.ind['ET100']*100
         d = self.ckt['duty']; fs = self.fs_dcm #ckt['fs_phase']
         fe = fs/(2*np.pi*(d-d**2))

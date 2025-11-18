@@ -18,6 +18,6 @@ import scipy.optimize as opt
 #from scipy.misc import derivative
 import numdifftools as nd
 import matplotlib.pyplot as plt
-import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+# import plotly.express as px
+# import plotly.graph_objects as go
+# from plotly.subplots import make_subplots

@@ -44,8 +44,8 @@ class Multiparam_multivar_df:
         df_pdis_results = {config_idx:pd.concat(self.df_var_list(new_params_x,self.varlist)) for config_idx,new_params_x in new_params.items()}
         for config_idx,df in df_pdis_results.items():
             for param,value in self.inp_config[config_idx].items():
-                df.insert(0,param,value)
-            df.insert(0,'config',f'config{config_idx}')
+                df.insert(0,param,value,allow_duplicates=True)
+            df.insert(0,'config',f'config{config_idx}',allow_duplicates=True)
             #df['config']=f'config{config_idx}'
         df_all = pd.concat(df_pdis_results.values())
         return df_all

@@ -19,7 +19,11 @@ def duty_iramp_up(vin,vout):
      
 
     
-def circuit_params(vin,vout,iout,fs,tamb,l_config):
+def circuit_params(ip): #(vin,vout,iout,fs,tamb,l_config):
+    #ip=ip.copy()
+    l_config=ip['lout']['config']
+    ton_mult = ip['ton_mult']
+    vin = ip['vin']; vout=ip['vout']; iout=ip['iout']; fs=ip['fs']/ton_mult; tamb=ip['tambient']
     dv_multiplier   = {'single':1,'series':0.5,'parallel':1}[l_config]
     iout_multiplier = {'single':1,'series':1,'parallel':0.5}[l_config]
     t_state13 = duty_freewheel(vin,vout)/fs
@@ -40,7 +44,9 @@ def circuit_params(vin,vout,iout,fs,tamb,l_config):
               't_Qhs':t_Qhs,
               't_Qls':t_Qls,
               'fs_phase'  :fs*2,
+              'ton_mult':ton_mult,
               'Tamb':tamb,
               'Idc':iout*iout_multiplier,
-              'Iinp':iout*iout_multiplier*vout/vin/eff_est
+              'Iinp':iout*iout_multiplier*vout/vin/eff_est,
+              'ip':ip
              }
