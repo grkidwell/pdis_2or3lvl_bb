@@ -5,3 +5,4 @@ openpyxl
 numdifftools
 matplotlib
 pandas_flavor
+jupyterlab
