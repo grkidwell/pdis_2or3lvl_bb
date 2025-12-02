@@ -1,0 +1,7 @@
+
+scipy
+pandas
+openpyxl
+numdifftools
+matplotlib
+pandas_flavor
