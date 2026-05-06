@@ -3,6 +3,7 @@
 
 import pandas as pd
 import numpy as np
+import numpy_rms
 from numpy import log as ln
 from math import e as e
 from math import sin as sin
@@ -15,3 +16,6 @@ import matplotlib.pyplot as plt
 # import plotly.express as px
 # import plotly.graph_objects as go
 # from plotly.subplots import make_subplots
+import pathlib
+
+import pd_filter_fcns

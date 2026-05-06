@@ -6,67 +6,43 @@ import numpy as np
 import pandas as pd
 from winding_temp_dcm import dcr_temp
 
+from circuit_6state import circuit_params as circuit_params_6state
 from circuit_4state import circuit_params as circuit_params_4state
 from circuit_2state import circuit_params as circuit_params_2state
 
 cyntec_filename = r'data/cyntec_inductor_data.xlsx'
 
-#ckt_params = {'deltaV','duty','fs','Tamb','Idc'}
-
 class Inductor_pdis:
-    def __init__(self,inp_params): #ckt_params):#dict,Lparams:dict):
+    def __init__(self,inp_params): 
         self.ip = inp_params.copy()
-        self.ckt = {'2 level':circuit_params_2state(self.ip),
-              '3 level':circuit_params_4state(self.ip)}\
-              [self.ip['lvl_config']]
-        #self.ckt = ckt_params #.copy()
+        self.ts = 1/self.ip['fs']
+                
+        self.update_ckt_params()
+        
         l_ip = self.ckt['ip']['lout']
-
         self.ind = lparams(l_ip['value(uH)'],create_ind_family_df(l_ip['family']))   #Lparams.copy()
         self.idc = self.ckt['Idc']
-        
-        # self.ckt = ckt_params.copy()
-        # self.ton_mult = self.ckt['ton_mult']
-        
-        #self.ipp = abs(self.ckt['deltaV']*self.ton_mult*self.ckt['t_for_deltaV']/Lparams['Lout']/1e-6)
-        
-        #self.ipp = abs(self.ckt['deltaV']*self.ckt['t_for_deltaV']/Lparams['Lout']/1e-6)        
-        
-        self.do_ccm_stuff()
+                
+        self.do_dcm_stuff()
         
         self.ton_mult=self.ckt['ton_mult']
-        #self.dcm_ratio=min(1,self.idc/(self.ipp/2))
         
         #phasenode dcm and ccm frequency
-        self.fs_dcm = round(self.dcm_ratio/(self.ckt['t_state13']+self.ckt['t_state24']),0)
-        
-        self.irms_dcm = self.i_rms_dcm()
-        
-        
+        #self.fs_dcm = round(self.dcm_ratio/(self.ts/2)) 
         
         self.ind['K1']=0  #no ac winding loss.  see winding_temp.py
-        self.p_core    = self.pcore()#self.ckt,Lparams)
+        self.p_core    = self.pcore()
+        
         self.tempco = 1/(234.45+25)
-        # self.t_winding = {False: round(dcr_temp(self.irms_dcm,self.ckt,self.ind,self.p_core,self.tempco),1),
-        #                   True: tamb}[noselfheat]
-        # if ('temp' in l_ip) and isinstance(l_ip['temp'],int):
-        #     self.t_winding = l_ip['temp']
-        # else:
-        #     self.t_winding = round(dcr_temp(self.irms_dcm,self.ckt,self.ind,self.p_core,self.tempco),1)
-
         if ('tcomponents' in self.ip and
             'lout' in self.ip['tcomponents'] and
             isinstance(self.ip['tcomponents']['lout'],int)):
             self.t_winding = self.ip['tcomponents']['lout']
         else:
             self.t_winding = round(dcr_temp(self.irms_dcm,self.ckt,self.ind,self.p_core,self.tempco),1)
-        
-        # print({False: round(dcr_temp(self.irms_dcm,self.ckt,self.ind,self.p_core,self.tempco),1),
-        #                   True: tamb}[noselfheat])
         self.DCR = self.ind['DCR']*(1+self.tempco*(self.t_winding-25))
-        #self.p_ac = Lparams['K1']*self.ipp**2*ckt_params['fs']**0.5*self.DCR
-        #self.p_dc = self.DCR*self.idc**2
         self.p_dc = self.DCR*self.irms_dcm**2
+        
         self.p_tot = self.p_dc+self.p_core
         self.summary = {'dcr':self.p_dc,
                         'core':self.p_core,
@@ -74,55 +50,82 @@ class Inductor_pdis:
                         'fs_dcm':self.fs_dcm,
                         'ton_mult':self.ton_mult,
                         'irms_dcm':self.irms_dcm}
+
+    def update_ckt_params(self):  #can re-rerun this function after change self.ip['lvl_config']
+        def carova_is_MR() ->bool:
+            vin = self.ip['vin']; vout = self.ip['vout']; tol = 0.12;
+            return (vout>(vin/2*(1-tol))) and (vout<(vin/2*(1+tol)))
+
+        if 'carova' not in self.ip['lvl_config']: #lvl_config options - '2 level', '3 level', '3 level carova'
+            self.ckt = {'2 level':circuit_params_2state(self.ip),
+                        '3 level':circuit_params_4state(self.ip)}[self.ip['lvl_config']]
+        else:
+            self.ckt = {True: circuit_params_6state(self.ip),
+                        False:circuit_params_4state(self.ip)}[carova_is_MR()]
+
+
+    def irms_fsdcm_carova_MR(self):
+        tstate = self.ckt['t_state'];deltaV = self.ckt['deltaV']
+        ipp = {state:round(dv*tstate[state]/self.ind['Lout']/1e-6,3) for state,dv in deltaV.items()}   
+        ipulse_avg_per_segment = {1:ipp[1]/2,2:ipp[1]+ipp[2]/2,3:abs(ipp[3])/2}
+        ipulse_avg = sum([time*ipulse_avg_per_segment[state] for state,time in tstate.items()])/sum(tstate.values())
+        dcm_ratio = min(1,self.idc/ipulse_avg )
+        fs_dcm = dcm_ratio/(self.ts/2)
+        ipulse_start = {1:0, 2:ipp[1], 3:ipp[1]+ipp[2]}
+        i_lout_points = {0:self.idc - ipulse_avg,
+                         1:ipulse_start[2]-ipulse_avg+self.idc,
+                         2:ipulse_start[3]-ipulse_avg+self.idc,
+                         3:self.idc - ipulse_avg}
+        ilp = i_lout_points
+        def i_ms_segment(idx1,idx2):
+            return (ilp[idx1]**2+ilp[idx1]*ilp[idx2]+ilp[idx2]**2)/3  #from Erickson p.748
+        self.i_start_bystate = {time+1:current for time,current in ilp.items() if time<3}
+        self.i_stop_bystate = {time:current for time,current in ilp.items() if time>0}
+        self.i_ms_bystate = {state:i_ms_segment(state-1,state) for state,time in tstate.items()}
+        i_lout_rms = (sum([time*self.i_ms_bystate[state] for state,time in tstate.items()])*fs_dcm)**0.5        
+        #i_lout_rms = (sum([time*i_ms_segment(state-1,state) for state,time in tstate.items()])*fs_dcm)**0.5
+        return i_lout_rms, fs_dcm
+
+    def irms_fsdcm_2or4state(self):
+        tstate = self.ckt['t_state']
+        is2state = self.ckt['state count']==2
+        ipp = self.ipp #self.ckt['volt-sec']/self.ind['Lout']/1e-6
+        ipulse_avg=ipp/2
+        dcm_ratio = min(1,self.idc/ipulse_avg )
+        fs_dcm = round(dcm_ratio/(self.ckt['t_state13']+self.ckt['t_state24']),0) #dcm_ratio/(self.ts/2)
+        d1 = self.ckt['t_state13']*fs_dcm
+        d2 = self.ckt['t_state24']*fs_dcm
+        self.i_start_bystate = {1:self.idc+1/2*ipp*(-1)**(is2state or (self.ckt['d_up_flag'])),
+                                2:self.idc+1/2*ipp*(-1)**(not(is2state or self.ckt['d_up_flag']))}
+        def i_ms_segment(i1,i2):
+            return (i1**2+i1*i2+i2**2)/3  #from Erickson p.748   
+        self.i_ms_bystate = {1:i_ms_segment(self.i_start_bystate[1],self.i_start_bystate[2]),
+                             2:i_ms_segment(self.i_start_bystate[2],self.i_start_bystate[1])}
+        self.i_lout_rms_check =(sum([time*self.i_ms_bystate[state] for state,time in tstate.items()])*fs_dcm)**0.5 
+        i_lout_rms = (self.idc**2+(d1+d2)/12*self.ipp**2)**0.5
+        return i_lout_rms, fs_dcm
         
-    def do_ccm_stuff(self):
-        #ton_mult  = self.ckt['ton_mult']
-        ipp       = abs(self.ckt['deltaV']*self.ckt['t_for_deltaV']/self.ind['Lout']/1e-6) 
-        dcm_ratio = self.idc/(ipp/2)
-        fs_dcm = dcm_ratio/(self.ckt['t_state13']+self.ckt['t_state24'])
+    def do_dcm_stuff(self):
+        self.ipp = self.ckt['volt-sec']/self.ind['Lout']/1e-6
+        if self.ckt['state count'] == 6:
+            self.irms_dcm, fs_dcm = self.irms_fsdcm_carova_MR()
+        else:
+            self.irms_dcm, fs_dcm = self.irms_fsdcm_2or4state()
+            
         ccm_hyst  = 1.1
         if fs_dcm > 2*self.ip['fs']:
-            ton_mult=1
-            ip=self.ckt['ip']
-            ip['ton_mult']=ton_mult
-            lvl_config=ip['lvl_config']
-            self.ckt = {'2 level':circuit_params_2state(ip),
-                        '3 level':circuit_params_4state(ip)}\
-                        [lvl_config]
-            ipp = abs(self.ckt['deltaV']*self.ckt['t_for_deltaV']/self.ind['Lout']/1e-6)
-            dcm_ratio=1
+            ip=self.ckt['ip']; ip['ton_mult']= 1 #this also updates self.ckt['ip']['ton_mult'] to 1
+            self.update_ckt_params()
+            self.ipp = self.ckt['volt-sec']/self.ind['Lout']/1e-6
+            dcm_ratio=1            
+        #self.ipp = ipp
+        #self.dcm_ratio = dcm_ratio #min(1,dcm_ratio)
+        self.fs_dcm = fs_dcm
             
-        elif dcm_ratio > ccm_hyst:
-            ton_mult = 1
-            ip=self.ckt['ip']
-            ip['ton_mult']=ton_mult
-            lvl_config=ip['lvl_config']
-            self.ckt = {'2 level':circuit_params_2state(ip),
-                        '3 level':circuit_params_4state(ip)}\
-                        [lvl_config]
-            ipp = abs(self.ckt['deltaV']*self.ckt['t_for_deltaV']/self.ind['Lout']/1e-6)
-            dcm_ratio = self.idc/(ipp/2)
-
-        else:
-            dcm_ratio = self.idc/(ipp/2)
-            
-        self.ipp = ipp
-        self.dcm_ratio = min(1,dcm_ratio)
-        
-        
-        #self.ckt = 
-        # self.ton_mult = self.ckt['ton_mult']
-        # self.ipp = abs(self.ckt['deltaV']*self.ckt['t_for_deltaV']/Lparams['Lout']/1e-6)   
-        # self.dcm_ratio=min(1,self.idc/(self.ipp/2))
-    
     def pcore(self): 
-        fs = self.fs_dcm
-        return self.ind['Ka']*fs**(self.ind['Kx'])*(self.ind['Kb']*self.ipp)**self.ind['Ky']
+        return self.ind['Ka']*self.fs_dcm**(self.ind['Kx'])*(self.ind['Kb']*self.ipp)**self.ind['Ky']
     
-    def i_rms_dcm(self):
-        d1 = self.ckt['t_state13']*self.fs_dcm
-        d2 = self.ckt['t_state24']*self.fs_dcm
-        return (self.idc**2+(d1+d2)/12*self.ipp**2)**0.5
+
     
     def losses(self):
         print(f'Total: {round(self.p_tot,3)}')

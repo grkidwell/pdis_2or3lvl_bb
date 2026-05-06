@@ -20,6 +20,8 @@ from board import p_cu
 from current_shunt import p_shunt
 
 
+
+
 class Buckconverter_losses:
     def __init__(self,inp_params:dict):
         self.ip = inp_params.copy()
@@ -27,34 +29,31 @@ class Buckconverter_losses:
             self.ip['iout']=self.ip['pin']/self.ip['vout']*self.ip['eff']
         self.cont_p = get_ic_params(self.ip['controller'])
         self.lvl_config = self.ip['lvl_config']        
-        self.ckt_params = {'2 level':circuit_params_2state(self.ip),
-                           '3 level':circuit_params_4state(self.ip)}[self.lvl_config]
+        # self.ckt_params = {'2 level':circuit_params_2state(self.ip),
+        #                    '3 level':circuit_params_4state(self.ip)}[self.lvl_config]
+        self.lout_obj = {True:Inductor_pdis_ihlp, False:Inductor_pdis}[self.is_ihlp()](self.ip)
+        self.ckt_params = self.lout_obj.ckt
         self.vds = self.ckt_params['vphase']
         self.vgate = self.ip['vgate']
         self.rboot = self.ip['rboot']
-        self.hs_p = mosfet_hs.get_fet_params(self.ip['hsfet_partnum'])
-        self.ls_p = mosfet_ls.get_fet_params(self.ip['lsfet_partnum'])
         self.q4_p = mosfet_q4.get_fet_params(self.ip['q4_partnum'])
         
         #self.lout_obj = Inductor_pdis(self.ip) 
-        self.lout_obj = {True:Inductor_pdis_ihlp, False:Inductor_pdis}[self.is_ihlp()](self.ip)
         self.fs_dcm = self.lout_obj.fs_dcm   #inductor ripple frequency
         self.idc = self.lout_obj.idc*{'single':1,'series':1,'parallel':2}[self.ip['lout']['config']]
         self.ipp = self.lout_obj.ipp*{'single':1,'series':1,'parallel':2}[self.ip['lout']['config']]
 
         self.p_lout = {param:value for param,value in self.lout_obj.summary.items() if param in ['dcr','core']}
-        self.hs_Losses_obj = mosfet_hs.Losses(self.ckt_params,self.fs_dcm,self.cont_p,self.hs_p,self.ls_p,self.vds,self.vgate,self.rboot,self.idc,self.ipp,
-                                     self.ip['m_hs'],self.ip['m_ls'],self.ip['rd'])
+        self.hs_Losses_obj = mosfet_hs.Losses(self.lout_obj)
         self.p_hs = self.hs_Losses_obj.summary 
-        self.ls_losses_obj = mosfet_ls.Losses(self.ckt_params,self.fs_dcm,self.cont_p,self.hs_p,self.ls_p,self.vds,self.vgate,self.idc,self.ipp,
-                                     self.ip['m_hs'],self.ip['m_ls'],self.ip['rd'])
+        self.ls_losses_obj = mosfet_ls.Losses(self.hs_Losses_obj) 
         self.p_ls = self.ls_losses_obj.summary
         self.q4_Losses_obj = mosfet_q4.Losses(self.ip,self.q4_p,self.lout_obj.irms_dcm)
         self.p_q4 = self.q4_Losses_obj.summary
 
         
         #caploss and cu calcs still need to be modified to account for period stretching
-        self.p_caps = Caplosses(self.ckt_params,self.idc,self.ipp,self.ip['caps']).summary        
+        self.p_caps = Caplosses(self.lout_obj).summary        
         self.p_cu = p_cu(self.ckt_params['Iinp'],self.ckt_params['Idc'],self.ip['tambient'])
         self.p_ic = self.cont_p['pic']
 
@@ -81,11 +80,11 @@ class Buckconverter_losses:
                         'q4 fet':sum(list(self.p_q4.values())),
                         'lout':sum(list(self.p_lout.values())),
                         'caps':sum(list(self.p_caps.values())),
-                        'ic_with_gate' : self.p_summary['ic']+(self.p_summary['hs gate']*self.ip['m_hs']+self.p_summary['ls gate']*self.ip['m_ls'])*{'2 level':1,'3 level':2}[self.lvl_config],
+                        'ic_with_gate' : self.p_summary['ic']+(self.p_summary['hs gate']*self.ip['m_hs']+self.p_summary['ls gate']*self.ip['m_ls'])*{'2 level':1,'3 level':2, '3 level carova':2}[self.lvl_config],
                         'board cu':self.p_cu}
 
         
-        self.ptotal = (self.p_totals['hs fet']*self.ip['m_hs']+self.p_totals['ls fet']*self.ip['m_ls'])*{'2 level':1,'3 level':2}[self.lvl_config]+ \
+        self.ptotal = (self.p_totals['hs fet']*self.ip['m_hs']+self.p_totals['ls fet']*self.ip['m_ls'])*{'2 level':1,'3 level':2, '3 level carova':2}[self.lvl_config]+ \
                   self.p_totals['q4 fet']+\
                   self.p_totals['lout']*(2)**(self.ip['lout']['config']!='single')+\
                   self.p_totals['caps']+self.p_summary['board cu']+self.p_totals['ic_with_gate']

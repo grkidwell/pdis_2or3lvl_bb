@@ -10,6 +10,7 @@ def circuit_params(ip):  #only 2 state but using 13 and 24 so keys compatible wi
     iout_multiplier = {'single':1,'series':1,'parallel':0.5}[l_config]
     t_state13 = duty(vin,vout)/fs
     t_state24 = (1-duty(vin,vout))/fs
+    tstate = {1:t_state13,2:t_state24}
     t_Qhs = t_state13
     t_Qls = t_state24
 
@@ -18,9 +19,12 @@ def circuit_params(ip):  #only 2 state but using 13 and 24 so keys compatible wi
     return {  'state count':2,
               'vin':vin,
               'vphase':vin,
+              'd_up_flag':False,  # always false for 2state, but added to simplify calling functions
               'deltaV':(vin-vout)*dv_multiplier,
               't_for_deltaV':duty(vin,vout)/fs,
+              'volt-sec':abs((vin-vout)*dv_multiplier*duty(vin,vout)/fs),
               'duty':duty(vin,vout),
+              't_state':tstate,
               't_state13': duty(vin,vout)/fs,
               't_state24': (1-duty(vin,vout))/fs,
               't_Qhs':t_Qhs,

@@ -31,7 +31,7 @@ class Current_capbanks_FFT:
         ampscale=2/icapfft.size
         xticks = np.arange(8)*self.Fs
         i=self.freq>=0
-        bar_width=300000
+        bar_width=100000
         fig,ax = plt.subplots(1,1,figsize=(8,4))
         rects1=ax.bar(self.freq[i],ampscale*i_bank_fft_mag[i],bar_width)
         ax.set_xlim(0,8*self.Fs)
@@ -47,7 +47,7 @@ class Current_capbanks_FFT:
         ampscale = 2/i_nbank_fft_mag[0].size
         i=freq>=0
         xticks = np.arange(8)*Fs
-        bar_width=300000
+        bar_width=100000
         for n, ax_n in enumerate(ax.flat): 
             if (n < len(i_nbank_fft_mag)):
                 rects = ax_n.bar(freq[i],ampscale*i_nbank_fft_mag[n][i],bar_width)

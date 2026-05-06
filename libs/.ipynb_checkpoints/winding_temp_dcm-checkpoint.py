@@ -9,7 +9,8 @@ def dcr_temp(i_rms_dcm,ckt_params:dict,Lparams:dict,p_core,tempco):
     dcr = lp['DCR'] #at 25C
     Rth = lp['Rth']
     idc = cp['Idc']
-    ipp = cp['deltaV']*cp['t_for_deltaV']/lp['Lout']/1e-6
+    #ipp = cp['deltaV']*cp['t_for_deltaV']/lp['Lout']/1e-6
+    ipp = cp['volt-sec']/lp['Lout']/1e-6
     #tempco = 1/(234.45+25) #assume that the provided DCR spec is at 25C
     k1 = lp['K1']
     fs = cp['fs_phase']

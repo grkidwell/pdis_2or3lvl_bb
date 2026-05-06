@@ -9,6 +9,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numdifftools as nd
 
+from mosfet_iswitch_states import ls_switch_states, ls_cond_states 
+
+
 
 
 mosfet_filename = r'data/mosfet_data.xlsx'
@@ -31,7 +34,18 @@ def get_fet_params(partnumber:str):
     params = {param:value*scalefactors[param] for param,value in paramdict.items() if unitdict[param] != 'na'}
     params['package']=paramdict['package']
     return params
-    
+
+def total_currents(lout_obj):
+    ip = lout_obj.ckt['ip']
+    idc = lout_obj.idc*{'single':1,'series':1,'parallel':2}[ip['lout']['config']]
+    ipp = lout_obj.ipp*{'single':1,'series':1,'parallel':2}[ip['lout']['config']]
+    return {'idc':idc,'ipp':ipp}
+
+def stripint(a):
+    if type(a) == str:
+        a = int(a[0])
+    return a
+
 class Fet_cap_vs_vds:
     def __init__(self,fetparams,vds):
         self.fetparams = fetparams
@@ -91,28 +105,36 @@ class Fet_cap_vs_vds:
         return  fp['Qgd']+np.trapz(f_values,v) 
 
 class Losses:
-    def __init__(self,ckt_params,fs_dcm,*args): 
-        self.ic_params,self.hsfet_params,self.lsfet_params,self.vds,self.vgate,idc,ipp,self.m_hs,self.m_ls,rd = args 
-        self.lsfp=self.lsfet_params
-        self.idc = idc/self.m_ls; self.ipp = ipp/self.m_ls
-        self.ckt_params = ckt_params        
+    def __init__(self,hs_losses_obj): 
+        self.lout_obj = hs_losses_obj.lout_obj;self.ckt_params = hs_losses_obj.ckt_params        
         self.ip = self.ckt_params['ip']
-        self.state_count = self.ckt_params['state count']
-        self.ts = {4:(2*self.ckt_params['t_state13']+2*self.ckt_params['t_state24']),
-                   2:self.ckt_params['t_state13']+self.ckt_params['t_state24']}[self.state_count]
-        self.fs=fs_dcm*{2:1,4:0.5}[self.state_count]  #1/self.ts    
-
-        self.vth = self.lsfp['Qgs']/self.lsfp['Ciss_Vds2'] 
-        #need to tune gate drive to waveform - may need to incorporate datasheet idrivemax
-        self.rglsdrvr = {5:self.ic_params['rg_lsdrvr_5V'],
-                        10:self.ic_params['rg_lsdrvr_10V']}[self.vgate]
-        self.rgls = self.lsfp['Rg']+self.m_ls*self.rglsdrvr        
-        self.i_valley = max(0,self.idc-self.ipp/2); self.i_peak = max(self.ipp,self.idc+self.ipp/2)
         
-        self.fet_cap = Fet_cap_vs_vds(self.lsfp,self.vds)
-        self.summary = {'bd_on':self.bd_f()['on'],
-                        'bd_off':self.bd_f()['off'],
-                        'ring': self.ring_f(),
+        self.vds=self.ckt_params['vphase'];self.vgate=self.ip['vgate']
+        self.m_hs=self.ip['m_hs'];self.m_ls=self.ip['m_ls'];self.rd=self.ip['rd']
+        self.ic_params = hs_losses_obj.ic_params
+        self.hsfet_params = hs_losses_obj.hsfet_params
+        self.lsfet_params = hs_losses_obj.lsfet_params       
+        
+        self.state_count = self.ckt_params['state count']
+        self.fs=self.lout_obj.fs_dcm*{2:1,4:0.5,6:0.5}[self.state_count]
+
+        self.vth = self.lsfet_params['Qgs']/self.lsfet_params['Ciss_Vds2'] 
+
+        self.fet_cap = Fet_cap_vs_vds(self.lsfet_params,self.vds)
+        
+        self.ls_sw_states = ls_switch_states(self.ckt_params)
+        self.i_scaler = {'single':1,'series':1,'parallel':2}[self.ip['lout']['config']]/self.m_ls        
+
+        self.bd_on_loss_dict = {state:self.bd_f('on',state) for state in self.ls_sw_states['on']}
+        self.bd_off_loss_dict = {state:self.bd_f('off',state) for state in self.ls_sw_states['off']}
+        self.ring_loss_dict = {state:self.ring_f(state) for state in self.ls_sw_states['on']}
+
+        self.ls_cond_states = ls_cond_states(self.ckt_params)
+        self.fetrms_dcm = self.rms_dcm_calculate()
+        
+        self.summary = {'bd_on':sum(self.bd_on_loss_dict.values()),
+                        'bd_off':sum(self.bd_off_loss_dict.values()),
+                        'ring': sum(self.ring_loss_dict.values()),
                         'gate': self.gate_f()}
         if ('tcomponents' in self.ip and
             'ls' in self.ip['tcomponents'] and
@@ -124,69 +146,94 @@ class Losses:
                         
 
     
-    def vfwd(self,ifw):
-        #need to tune/measure body diode drop vs current
-        enabled = False
-        vbd_spec = self.lsfet_params['Vbd']
-        return vbd_spec+vbd_spec/self.lsfet_params['Id_vbd']*(ifw)**0.5*enabled
-    def bd_f(self): #uses 489300 phasenode bd measurements
+
+    
+        
+    def bd_f(self,on_or_off,state): #uses 489300 phasenode bd measurements
+        state = stripint(state)
+        def vfwd(ifw):
+            #need to tune/measure body diode drop vs current
+            enabled = False
+            vbd_spec = self.lsfet_params['Vbd']
+            return vbd_spec+vbd_spec/self.lsfet_params['Id_vbd']*(ifw)**0.5*enabled
+        def pfwd(itot,time):
+            ifw = itot*self.i_scaler  #for fets in parallel
+            return vfwd(ifw)*ifw*time*self.fs
+
+        rglsdrvr = {5:self.ic_params['rg_lsdrvr_5V'],
+                        10:self.ic_params['rg_lsdrvr_10V']}[self.vgate]
+        rgls = self.lsfet_params['Rg']+self.m_ls*rglsdrvr 
         v_sgf = 0.1*self.vgate
-        t_gsr = self.rgls*self.lsfp['Ciss_0V']*ln(self.vgate/(self.vgate-self.vth))
+        t_gsr = rgls*self.lsfet_params['Ciss_0V']*ln(self.vgate/(self.vgate-self.vth))
         t_bd_on = self.ic_params['tsfet_dt_on']#+t_gsr
-        t_gsf = self.rgls*self.lsfp['Ciss_0V']*ln(self.vth/v_sgf)
-        t_bd_off = t_gsf+self.ic_params['tsfet_dt_off']#+t_gsf+self.rgls*self.lsfp['Ciss_Vds2']*ln(self.vgate/(self.vgate-self.vth))
-        return {'on':  self.vfwd(self.i_peak)*self.i_peak*t_bd_on*self.fs,
-                'off': self.vfwd(self.i_valley)*self.i_valley*t_bd_off*self.fs,
-                'tgsr':t_gsr,
-                't_bd_on':t_bd_on,
-                'tgsf':t_gsf,
-                't_bd_off':t_bd_off} 
+        t_gsf = rgls*self.lsfet_params['Ciss_0V']*ln(self.vth/v_sgf)
+        t_bd_off = t_gsf+self.ic_params['tsfet_dt_off']#+t_gsf+self.rgls*self.lsfet_params['Ciss_Vds2']*ln(self.vgate/(self.vgate-self.vth))
+        t_bd = {'on':t_bd_on,
+                'off':t_bd_off}[on_or_off]
+        itot = self.lout_obj.i_start_bystate[state]*self.i_scaler
+        return pfwd(itot,t_bd)
+        
+        # return {'on':  sum(pbd_on_dict.values()),
+        #         'off': sum(pbd_off_dict.values()),
+        #         'tgsr':t_gsr,
+        #         't_bd_on':t_bd_on,
+        #         'tgsf':t_gsf,
+        #         't_bd_off':t_bd_off} 
                 
+    def rms_dcm_calculate(self):
+        ts = 1/self.fs
+        i_scaler = {'single':1,'series':1,'parallel':2}[self.ip['lout']['config']]/self.m_ls
+        #period_multiplier = {2:1,4:2,6:2}[self.state_count]
+        cond_states = self.ls_cond_states
+        ims = self.lout_obj.i_ms_bystate
+        tstate = self.ckt_params['t_state']
+        t_fullcycle = 1/self.fs
+        ms_tot = sum([tstate[stripint(state)]*ims[stripint(state)] for state in cond_states])
+        return (ms_tot/t_fullcycle)**0.5*i_scaler
+
     def temp_f(self):
         pfixed = sum([val for key,val in self.summary.items() if key in ['bd_on','bd_off','ring']])
         Rth = self.lsfet_params['RthJA']
         tamb = self.ckt_params['Tamb']
         tempco = 3500e-6
         rdson_25C = {5:self.lsfet_params['Rdson_4.5V'],10:self.lsfet_params['Rdson_10V']}[self.vgate]
-        t_Qls = self.ckt_params['t_Qls']
-        i_fetrms = (((self.idc**2+self.ipp**2/12)*t_Qls/self.ts)**0.5)/self.m_ls
-        rdson_term = i_fetrms**2*rdson_25C
+        rdson_term = self.fetrms_dcm**2*rdson_25C
         return abs(((25*tempco-1)*rdson_term-tamb-pfixed*Rth)/(rdson_term*tempco-1))
         
     def cond_f(self):
         tcoeff = 3500e-6
         tmult = tcoeff*(self.temp-25)
         rdson = {5:self.lsfet_params['Rdson_4.5V'],10:self.lsfet_params['Rdson_10V']}[self.vgate]*(1+tmult)
-        t_Qls = self.ckt_params['t_Qls']
-        i_fetrms = ((self.idc**2+self.ipp**2/12)*t_Qls/self.ts)**0.5/self.m_ls
-        return i_fetrms**2*rdson 
+        return self.fetrms_dcm**2*rdson 
 
-    def qrr(self,*args:str):
-            lsp=self.lsfet_params
-            qrr_ls = lsp['Qrr']
-            qoss = self.fet_cap.q_oss(lsp['Vds_qrr'])
-            if 'print' in args:
-                print(f'qrr: {qrr_ls}')
-                print(f'qoss: {qoss}')
-            if qrr_ls > qoss:
-                qrr_net = qrr_ls-qoss
-            else:
-                qrr_net = qrr_ls
+    def qrr(self,state,*args:str):
+        state = stripint(state)
+        i_bd = self.lout_obj.i_start_bystate[state]*self.i_scaler
+        lsp=self.lsfet_params
+        qrr_ls = lsp['Qrr']
+        qoss = self.fet_cap.q_oss(lsp['Vds_qrr'])
+        if 'print' in args:
+            print(f'qrr: {qrr_ls}')
+            print(f'qoss: {qoss}')
+        if qrr_ls > qoss:
+            qrr_net = qrr_ls-qoss
+        else:
             qrr_net = qrr_ls
-            if 'qrr_vs_i' not in self.ip.keys():
-                self.ip['qrr_vs_i'] = 'constant'
-            qrr_exp = {'constant':0,'linear':1,'sqrt':0.5}[self.ip['qrr_vs_i']]
-            qrr_net = qrr_net*(self.i_valley/lsp['Id_qrr'])**qrr_exp
-            # if 'linear' in args:
-            #     qrr_net = qrr_net*self.i_valley/lsp['Id_qrr']
-            # elif 'sqrt' in args:
-            #     qrr_net = qrr_net*(self.i_valley/lsp['Id_qrr'])**0.5
-            return max(qrr_net,0)
-            #if qoss>qrr then qrr losses aren't counted which makes no sense
+        qrr_net = qrr_ls
+        if 'qrr_vs_i' not in self.ip.keys():
+            self.ip['qrr_vs_i'] = 'constant'
+        qrr_exp = {'constant':0,'linear':1,'sqrt':0.5}[self.ip['qrr_vs_i']]
+        qrr_net = qrr_net*(i_bd/lsp['Id_qrr'])**qrr_exp
+        # if 'linear' in args:
+        #     qrr_net = qrr_net*self.i_valley/lsp['Id_qrr']
+        # elif 'sqrt' in args:
+        #     qrr_net = qrr_net*(self.i_valley/lsp['Id_qrr'])**0.5
+        return max(qrr_net,0)
+        #if qoss>qrr then qrr losses aren't counted which makes no sense
 
-    def ring_f(self):   
+    def ring_f(self,state):   
         qoss_vphase = self.fet_cap.q_oss(self.vds)
-        return (self.vds*self.qrr()+qoss_vphase/2*self.vds)*self.fs
+        return (self.vds*self.qrr(state)+qoss_vphase/2*self.vds)*self.fs
         
     def gate_f(self):
         ciss_0V = self.lsfet_params['Ciss_0V']

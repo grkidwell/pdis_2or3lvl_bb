@@ -28,6 +28,7 @@ def circuit_params(ip): #(vin,vout,iout,fs,tamb,l_config):
     iout_multiplier = {'single':1,'series':1,'parallel':0.5}[l_config]
     t_state13 = duty_freewheel(vin,vout)/fs
     t_state24 = (1-2*duty_freewheel(vin,vout))/2/fs
+    tstate = {1:t_state13,2:t_state24}
     t_Qhs = t_state24+2*t_state13*up_flag(vin,vout)
     t_Qls = t_state24+2*t_state13*(not up_flag(vin,vout))
     eff_est=.95
@@ -35,10 +36,13 @@ def circuit_params(ip): #(vin,vout,iout,fs,tamb,l_config):
     return {  'state count':4,
               'vin':vin,
               'vphase':vin/2,
+              'd_up_flag':up_flag(vin,vout),
               'deltaV':(vin/2-vout)*dv_multiplier,
               't_for_deltaV':(1-2*duty_freewheel(vin,vout))/2/fs,
-              'duty_freewheel':duty_freewheel(vin,vout),
-              'duty': duty_iramp_up(vin,vout),
+              'volt-sec':abs((vin/2-vout)*dv_multiplier*(1-2*duty_freewheel(vin,vout))/2/fs),
+              #'duty_freewheel':duty_freewheel(vin,vout),
+              #'duty': duty_iramp_up(vin,vout),
+              't_state':tstate,
               't_state13': t_state13,
               't_state24': t_state24,
               't_Qhs':t_Qhs,

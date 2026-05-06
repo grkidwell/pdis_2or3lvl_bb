@@ -10,7 +10,9 @@ import matplotlib.pyplot as plt
 import numdifftools as nd
 
 from unit_waveforms_turnon import Four_state
+from controller import get_ic_params
 
+from mosfet_iswitch_states import hs_switch_states, hs_cond_states 
 
 mosfet_filename = r'data/mosfet_data.xlsx'
 
@@ -31,6 +33,18 @@ def get_fet_params(partnumber:str):
     params = {param:value*scalefactors[param] for param,value in paramdict.items() if unitdict[param] != 'na'}
     params['package']=paramdict['package']
     return params
+
+def stripint(a):
+    if type(a) == str:
+        a = int(a[0])
+    return a
+
+# def total_currents(lout_obj):
+#     ip = lout_obj.ckt['ip']
+#     idc = lout_obj.idc*{'single':1,'series':1,'parallel':2}[ip['lout']['config']]
+#     ipp = lout_obj.ipp*{'single':1,'series':1,'parallel':2}[ip['lout']['config']]
+#     return {'idc':idc,'ipp':ipp}
+
     
 class Fet_cap_vs_vds:
     def __init__(self,fetparams,vds):
@@ -92,19 +106,23 @@ class Fet_cap_vs_vds:
         return  fp['Qgd']+np.trapz(f_values,v) 
 
 class Fet_switching_on:   
-    def __init__(self,args:tuple):  #idc and ipp are total current
-        ic_params,hsfet_params,lsfet_params,vds,vgate,rboot,idc,ipp,m_hs,m_ls,rd = args
-        self.icp = ic_params; self.hsfp = hsfet_params; self.lsfp = lsfet_params
-        self.vds = vds; self.vdr = vgate; self.rboot = rboot
-        self.idc = idc/m_hs; self.ipp = ipp/m_hs
-        self.m_hs=m_hs; self.m_ls=m_ls; self.rd=rd
+    def __init__(self,lout_obj,state):
+        self.state = stripint(state)
+        self.lout_obj = lout_obj;self.ckt_params = self.lout_obj.ckt;self.ip = self.ckt_params['ip']
+        self.vds=self.ckt_params['vphase'];self.vdr=self.ip['vgate'];self.rboot=self.ip['rboot']
+        self.m_hs=self.ip['m_hs'];self.m_ls=self.ip['m_ls'];self.rd=self.ip['rd']
+        self.icp = get_ic_params(self.ip['controller'])
+        self.hsfp = get_fet_params(self.ip['hsfet_partnum'])
+        self.lsfp = get_fet_params(self.ip['lsfet_partnum'])
         
+        i_scaler = {'single':1,'series':1,'parallel':2}[self.ip['lout']['config']]/self.m_hs
+        self.i_on = self.lout_obj.i_start_bystate[self.state]*i_scaler
+                
         self.vth = self.hsfp['Qgs']/self.hsfp['Ciss_Vds2'] 
         self.rghsdrvr = {5:self.icp['rg_hsdrvr_5V'],
                         10:self.icp['rg_hsdrvr_10V']}[self.vdr]
         self.rghs = self.hsfp['Rg']+self.m_hs*self.rghsdrvr+self.rboot    
         
-        self.i_valley = max(0,self.idc-self.ipp/2); self.i_peak = max(self.ipp,self.idc+self.ipp/2)
         
         self.fet_cap = Fet_cap_vs_vds(self.hsfp,self.vds)
         #self.cgd = self.fet_cap.q_gd()/self.vds
@@ -164,12 +182,12 @@ class Fet_switching_on:
         def t_ir():
             def t_ir_max():
                 est_ton = 0
-                while id_t(est_ton) < self.i_valley:
+                while id_t(est_ton) < self.i_on:
                    est_ton += tau_gs/100
                 return est_ton
             t_ir_ = t_ir_max()
             def t_ir_func(t):
-                return id_t(t)-self.i_valley
+                return id_t(t)-self.i_on
             return opt.brentq(t_ir_func,0,t_ir_)  #root         
         def t_vf():
             def t_vf_max():
@@ -201,7 +219,7 @@ class Fet_switching_on:
             ton_vf = t_vf()        
             i_slower_v = ton_vf < ton_ir
             ton_t1 = {True:ton_vf,False:ton_ir}[i_slower_v]
-            id_on2_0 = {True:id_t(ton_t1),False:self.i_valley}[i_slower_v]
+            id_on2_0 = {True:id_t(ton_t1),False:self.i_on}[i_slower_v]
             vds_on2_0 = {True:0.1,False:vds_t(ton_t1)}[i_slower_v]
             vgs_on2_0 = vgs_t(ton_t1)
 
@@ -223,13 +241,13 @@ class Fet_switching_on:
                     False:t0['vgs']}[t0['i_slower_v']]
         def id_t(t):
             return {True:t0['id']+self.vds/(self.ld+ls)*t,
-                    False:self.i_valley}[t0['i_slower_v']]
+                    False:self.i_on}[t0['i_slower_v']]
         def vds_t(t):
             return {True:0,
-                    False:t0['vds']-t*(gfs*(self.vdr-self.vth)-self.i_valley)/(1+gfs*self.rghs)/cgd}[t0['i_slower_v']]    
+                    False:t0['vds']-t*(gfs*(self.vdr-self.vth)-self.i_on)/(1+gfs*self.rghs)/cgd}[t0['i_slower_v']]    
         def t_ir_max():
             est_ton = 0
-            while id_t(est_ton) < self.i_valley:
+            while id_t(est_ton) < self.i_on:
                est_ton += tau_gs/100
             return est_ton
         def t_vf_max():
@@ -243,7 +261,7 @@ class Fet_switching_on:
             t2 = {True:  ir_max,
                   False: vf_max}[t0['i_slower_v']]
             def t_ir_func(t):
-                return id_t(t)-self.i_valley
+                return id_t(t)-self.i_on
             def t_vf_func(t):
                 return vds_t(t)
             return {True:  opt.brentq(t_ir_func,0,ir_max),
@@ -272,7 +290,7 @@ class Fet_switching_on:
         def vgs_t(t):
             return (self.vdr-t0['vgs'])*(1-e**-(t/tau_gs))+t0['vgs']
         def id_t(t):
-            return self.i_valley
+            return self.i_on
         def vds_t(t):
             return 0
         return {'vgs_t':vgs_t(t),
@@ -346,19 +364,23 @@ class Fet_switching_on:
         ax.plot(tarray*1e9,pds, 'm')
 
 class Fet_switching_off:
-    def __init__(self,args:tuple):      #idc and ipp are total current   
-        ic_params,hsfet_params,lsfet_params,vds,vgate,rboot,idc,ipp,m_hs,m_ls,rd = args
-        self.icp = ic_params; self.hsfp = hsfet_params; self.lsfp = lsfet_params        
-        self.vds = vds; self.vdr = vgate        
-        self.idc = idc/m_hs; self.ipp = ipp/m_hs
-        self.m_hs=m_hs;self.m_ls=m_ls
-        self.rd = rd
+    def __init__(self,lout_obj,state): 
+        self.state = stripint(state)
+        self.lout_obj = lout_obj;self.ckt_params = self.lout_obj.ckt;self.ip = self.ckt_params['ip']
+        self.vds=self.ckt_params['vphase'];self.vdr=self.ip['vgate']
+        self.m_hs=self.ip['m_hs'];self.m_ls=self.ip['m_ls'];self.rd=self.ip['rd']
+        self.icp = get_ic_params(self.ip['controller'])
+        self.hsfp = get_fet_params(self.ip['hsfet_partnum'])
+        self.lsfp = get_fet_params(self.ip['lsfet_partnum'])
+
+        i_scaler = {'single':1,'series':1,'parallel':2}[self.ip['lout']['config']]/self.m_hs
+        self.i_off = self.lout_obj.i_start_bystate[self.state]*i_scaler
         
         self.rghsdrvr = {5:self.icp['rg_hsdrvr_5V'],
                         10:self.icp['rg_hsdrvr_10V']}[self.vdr]
         self.rghs = self.hsfp['Rg']+self.m_hs*self.rghsdrvr        
         self.vth = self.hsfp['Qgs']/self.hsfp['Ciss_Vds2']
-        self.i_valley = self.idc-self.ipp/2; self.i_peak = self.idc+self.ipp/2
+        
         
         self.fet_cap = Fet_cap_vs_vds(self.hsfp,self.vds)
         #self.cgd = self.fet_cap.q_gd()/self.vds
@@ -375,16 +397,16 @@ class Fet_switching_off:
         
         def vgs_t(t):
             return self.vdr*e**-(t/tau_gs)
-        id_t = self.i_peak
+        id_t = self.i_off
         vds_t = 0
 
         def t_td_max():            
             est_t = 0
-            while vgs_t(est_t) > self.vth + self.i_peak/gfs:
+            while vgs_t(est_t) > self.vth + self.i_off/gfs:
                est_t += tau_gs/100
             return est_t
         def t_td_func(t):
-            return vgs_t(t)-self.vth-self.i_peak/gfs
+            return vgs_t(t)-self.vth-self.i_off/gfs
         t_td = opt.brentq(t_td_func,0,t_td_max())
 
         if 't' in kwargs.keys():
@@ -405,9 +427,9 @@ class Fet_switching_off:
         tau_gs = self.rghs*(cgd+self.cgs)
         
         vgs_t = t0['vgs']
-        id_t = self.i_peak
+        id_t = self.i_off
         def vds_t(t):
-            a=gfs*self.vth+self.i_peak
+            a=gfs*self.vth+self.i_off
             b=(1+gfs*self.rghs)*cgd
             return a/b*t
 
@@ -447,27 +469,27 @@ class Fet_switching_off:
         def vgs_t_exp(t):
             a = tau_b*e**-(t/tau_b)-tau_c*e**-(t/tau_c)
             b = tau_b - tau_c
-            return (self.i_peak/gfs+self.vth)*a/b
+            return (self.i_off/gfs+self.vth)*a/b
         def vgs_t_sin(t):
-            a = (self.i_peak/gfs+self.vth)*e**-(t/tau_a)
+            a = (self.i_off/gfs+self.vth)*e**-(t/tau_a)
             return a*(cos(w_a*t)+sin(w_a*t)/w_a/tau_a)
             
         def id_t_exp(t):
             a = tau_b*e**-(t/tau_b)-tau_c*e**-(t/tau_c)
             b = tau_b - tau_c
-            return (gfs*self.vth+self.i_peak)*(a/b)-gfs*self.vth
+            return (gfs*self.vth+self.i_off)*(a/b)-gfs*self.vth
         def id_t_sin(t):
-            a=(gfs*self.vth+self.i_peak)*e**-(t/tau_a)
+            a=(gfs*self.vth+self.i_off)*e**-(t/tau_a)
             return a*(cos(w_a*t)+sin(w_a*t)/w_a/tau_a)
             
         def vds_t_exp(t):
             a = e**-(t/tau_b)-e**-(t/tau_c)
             b = tau_b - tau_c
-            return self.vds+(self.ld+self.hsfp['Lsource'])*(gfs*self.vth+self.i_peak)*a/b
+            return self.vds+(self.ld+self.hsfp['Lsource'])*(gfs*self.vth+self.i_off)*a/b
         def vds_t_sin(t):
             c = w_a*e**-(t/tau_a)
             d = (1+1/(w_a*tau_a)**2)*sin(w_a*t)
-            return self.vds+(self.ld+self.hsfp['Lsource'])*(gfs*self.vth+self.i_peak)*c*d
+            return self.vds+(self.ld+self.hsfp['Lsource'])*(gfs*self.vth+self.i_off)*c*d
         #Below functions are f(t)
         vgs_t = {True:vgs_t_exp,False:vgs_t_sin}[exp_flag]
         id_t  = {True:id_t_exp, False:id_t_sin}[exp_flag]
@@ -584,20 +606,34 @@ class Fet_switching_off:
         ax.plot(tarray*1e9,pds, 'm')
 
 class Losses:
-    def __init__(self,ckt_params,fs_dcm,*args): 
-        self.args=args
-        self.ic_params,self.hsfet_params,lsfet_params,self.vds,self.vgate,self.rboot,self.idc,self.ipp,self.m_hs,m_ls,rd = self.args        
-        self.ckt_params = ckt_params 
+    def __init__(self,lout_obj): #ckt_params,fs_dcm,*args): 
+        
+        self.lout_obj = lout_obj; self.ckt_params = self.lout_obj.ckt
         self.ip = self.ckt_params['ip']
+
+        self.vds=self.ckt_params['vphase'];self.vgate=self.ip['vgate']
+        self.m_hs=self.ip['m_hs'];self.m_ls=self.ip['m_ls'];self.rd=self.ip['rd']
+        self.ic_params = get_ic_params(self.ip['controller'])
+        self.hsfet_params = get_fet_params(self.ip['hsfet_partnum'])
+        self.lsfet_params = get_fet_params(self.ip['lsfet_partnum'])
+            
         self.state_count = self.ckt_params['state count']
-        self.ts = {4:(2*self.ckt_params['t_state13']+2*self.ckt_params['t_state24']),
-                   2:self.ckt_params['t_state13']+self.ckt_params['t_state24']}[self.state_count]
-        self.fs=fs_dcm*{2:1,4:0.5}[self.state_count]   #1/self.ts        
-        self.fet_switch_on_obj = Fet_switching_on(self.args)
-        self.fet_switch_off_obj = Fet_switching_off(self.args)        
-        self.summary = {'sw_on':self.fs*self.fet_switch_on_obj.e_on(),
-                        'sw_off':self.fs*self.fet_switch_off_obj.e_off(),
-                        'ring': self.ring_f(),
+        self.fs=self.lout_obj.fs_dcm*{2:1,4:0.5,6:0.5}[self.state_count]   
+
+        self.hs_sw_states = hs_switch_states(self.ckt_params)
+        self.fet_sw_on_obj_dict = {state:Fet_switching_on(self.lout_obj,state) for state in self.hs_sw_states['on']}
+        self.fet_sw_off_obj_dict = {state:Fet_switching_off(self.lout_obj,state) for state in self.hs_sw_states['off']}    
+
+        self.fet_sw_on_loss_dict = {state:self.fs*sw_on_obj.e_on() for state,sw_on_obj in self.fet_sw_on_obj_dict.items()}
+        self.fet_sw_off_loss_dict = {state:self.fs*sw_off_obj.e_off() for state,sw_off_obj in self.fet_sw_off_obj_dict.items()}
+        self.fet_ring_loss_dict = {state:self.ring_f(sw_off_obj) for state,sw_off_obj in self.fet_sw_off_obj_dict.items()}
+
+        self.hs_cond_states = hs_cond_states(self.ckt_params)
+        self.fetrms_dcm = self.rms_dcm_calculate()
+        
+        self.summary = {'sw_on' :sum(self.fet_sw_on_loss_dict.values()),
+                        'sw_off':sum(self.fet_sw_off_loss_dict.values()),
+                        'ring': sum(self.fet_ring_loss_dict.values()),  
                         'gate': self.gate_f()}
         if ('tcomponents' in self.ip and
             'hs' in self.ip['tcomponents'] and
@@ -606,34 +642,51 @@ class Losses:
         else:
             self.temp = self.temp_f()
         self.summary['cond'] = self.cond_f()
-                        
+
+    def rms_dcm_calculate(self):
+        ts = 1/self.fs
+        i_scaler = {'single':1,'series':1,'parallel':2}[self.ip['lout']['config']]/self.m_hs
+        #period_multiplier = {2:1,4:2,6:2}[self.state_count]
+        cond_states = self.hs_cond_states
+        ims = self.lout_obj.i_ms_bystate
+        tstate = self.ckt_params['t_state']
+        t_fullcycle = 1/self.fs
+        ms_tot = sum([tstate[stripint(state)]*ims[stripint(state)] for state in cond_states])
+        return (ms_tot/t_fullcycle)**0.5*i_scaler
+
+        
+
+    # def rms_dcm_calculate(self):
+    #     ts = 1/self.fs
+    #     t_Qhs = self.ckt_params['t_Qhs']
+    #     itot = self.lout_obj.irms_dcm*{'single':1,'series':1,'parallel':2}[self.ip['lout']['config']]
+    #     return (itot*(t_Qhs/ts)**0.5)/self.m_hs 
+        
     def temp_f(self):
         pfixed = sum([val for key,val in self.summary.items() if key in ['sw_on','sw_off','ring']])
         Rth = self.hsfet_params['RthJA']
         tamb = self.ckt_params['Tamb']
         tempco = 3500e-6
         rdson_25C = {5:self.hsfet_params['Rdson_4.5V'],10:self.hsfet_params['Rdson_10V']}[self.vgate]
-        t_Qhs = self.ckt_params['t_Qhs']
-        i_fetrms = (((self.idc**2+self.ipp**2/12)*t_Qhs/self.ts)**0.5)/self.m_hs
-        rdson_term = i_fetrms**2*rdson_25C
+        rdson_term = self.fetrms_dcm**2*rdson_25C
         return abs(((25*tempco-1)*rdson_term-tamb-pfixed*Rth)/(rdson_term*tempco-1))
         
     def cond_f(self):
         tempco = 3500e-6
         tmult = tempco*(self.temp-25)
         rdson = {5:self.hsfet_params['Rdson_4.5V'],10:self.hsfet_params['Rdson_10V']}[self.vgate]*(1+tmult)
-        t_Qhs = self.ckt_params['t_Qhs']
-        i_fetrms = (((self.idc**2+self.ipp**2/12)*t_Qhs/self.ts)**0.5)/self.m_hs
-        return i_fetrms**2*rdson
+        return self.fetrms_dcm**2*rdson
 
-    def ring_f(self):
-        fet_ds_ring_pk = self.fet_switch_off_obj.vds_ringpk #this must be called after e_off
+    def ring_f(self,sw_off_obj):
+        fet_ds_ring_pk = sw_off_obj.vds_ringpk #this must be called after e_off
         qoss_vphase = Fet_cap_vs_vds(self.hsfet_params,self.vds).q_oss(self.vds)
         qoss_vds_ring_pk = Fet_cap_vs_vds(self.hsfet_params,fet_ds_ring_pk).q_oss(fet_ds_ring_pk)        
-        return (qoss_vds_ring_pk/2*(fet_ds_ring_pk-2*self.vds)+qoss_vphase/2*self.vds)*self.fs
+        return (qoss_vds_ring_pk/2*(sw_off_obj.vds_ringpk-2*self.vds)+qoss_vphase/2*self.vds)*self.fs 
         
     def gate_f(self):
         ciss_0V = self.hsfet_params['Ciss_0V']
         qfet_gate = self.vgate*ciss_0V
         vbias = {'no':self.vgate,'yes':self.ckt_params['vin']}[self.ic_params['ldo']]
         return qfet_gate*self.vgate*(vbias/self.vgate)*self.fs
+
+
